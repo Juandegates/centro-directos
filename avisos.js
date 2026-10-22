@@ -21,7 +21,7 @@ export async function avisar(titulo, mensaje, { prioridad = 3, etiquetas = [], a
         title: titulo,
         message: mensaje,
         priority: prioridad,
-        tags: etiquetas,
+        // Los títulos ya traen su emoji; las etiquetas de ntfy lo duplicarían.
         ...(abrir ? { click: abrir } : {}),
         ...(acciones.length ? { actions: acciones.slice(0, 3).map((a) => ({ action: 'view', label: a.texto, url: a.url, clear: true })) } : {}),
       }),

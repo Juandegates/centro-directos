@@ -1,6 +1,7 @@
 // Estado central del Centro: semáforo por parte, bitácora de eventos y reporte de diagnóstico.
 import { readFileSync } from 'node:fs';
 import { release, totalmem, freemem, cpus } from 'node:os';
+import { ajustes } from './ajustes.js';
 
 export const VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 
@@ -63,6 +64,8 @@ export function limpiar(texto) {
     const v = process.env[k];
     if (v && v.length >= 4) t = t.split(v).join(`[${k} oculto]`);
   }
+  const pin = ajustes().pin;
+  if (pin) t = t.split(pin).join('[PIN oculto]');
   return t.replace(/(access_token|refresh_token|key|streamName|stream_key)=([^&\s"]+)/gi, '$1=[oculto]')
     .replace(/rtmps?:\/\/[^\s"]+/gi, 'rtmp://[oculto]');
 }

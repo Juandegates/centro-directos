@@ -2,7 +2,7 @@
 import { marcar } from './estado.js';
 
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const RESPALDOS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+const PREFERIDOS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
 const ESPERA_MAXIMA_MS = 25_000;
 
 let avisos = () => {};
@@ -12,10 +12,29 @@ let geminiPausadoHasta = 0;
 let configIA = () => ({});
 export const configurarIA = (fn) => { configIA = fn; };
 
+// Pregunta a Google qué modelos Flash tiene disponibles tu clave (cambian con el tiempo).
+let catalogo = { hora: 0, modelos: [] };
+async function modelosDisponibles(clave) {
+  if (Date.now() - catalogo.hora < 6 * 3600_000 && catalogo.modelos.length) return catalogo.modelos;
+  try {
+    const r = await fetch(`${URL_BASE}?pageSize=1000`, { headers: { 'x-goog-api-key': clave }, signal: AbortSignal.timeout(10_000) });
+    const d = await r.json();
+    const version = (n) => Number((n.match(/gemini-(\d+(?:\.\d+)?)/) ?? [])[1] ?? 0);
+    const modelos = (d.models ?? [])
+      .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
+      .map((m) => m.name.replace('models/', ''))
+      .filter((n) => /^gemini-.*flash/.test(n) && !/image|tts|audio|live|embedding|thinking|exp/.test(n))
+      .sort((a, b) => version(b) - version(a) || Number(/lite/.test(a)) - Number(/lite/.test(b)) || Number(/preview/.test(a)) - Number(/preview/.test(b)));
+    if (modelos.length) catalogo = { hora: Date.now(), modelos };
+  } catch { /* sin catálogo: usamos los preferidos */ }
+  return catalogo.modelos;
+}
+
 async function gemini({ sistema, texto, imagenes }) {
   const clave = process.env.GEMINI_API_KEY;
   if (!clave) throw new Error('Falta GEMINI_API_KEY en claves.txt');
-  const modelos = [...new Set([process.env.GEMINI_MODELO, ...RESPALDOS].filter(Boolean))];
+  const disponibles = await modelosDisponibles(clave);
+  const modelos = [...new Set([process.env.GEMINI_MODELO, ...PREFERIDOS, ...disponibles].filter(Boolean))].slice(0, 6);
 
   const cuerpo = JSON.stringify({
     systemInstruction: { parts: [{ text: sistema }] },
@@ -102,7 +121,7 @@ export async function preguntarIA({ sistema, texto, imagenes = [] }) {
       errorGemini = e;
       if (e.limite) {
         geminiPausadoHasta = Date.now() + 60_000;
-        marcar('ia', 'aviso', e.message + '; uso la IA de la PC por 1 minuto', e.message);
+        marcar('ia', 'aviso', e.message + (configIA().iaLocal?.activa ? '; uso la IA de la PC por 1 minuto' : '; reintento en 1 minuto'), e.message);
       }
     }
   }

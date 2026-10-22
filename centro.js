@@ -371,7 +371,7 @@ const paginasLocales = {
 };
 
 await iniciarServidor({ pin: PIN, rutas, paginasLocales });
-log(`📱 App del celular: ${urlApp()}  ·  PIN: ${PIN}`);
+console.log(`📱 App del celular: ${urlApp()}  ·  PIN: ${PIN}`); // el PIN solo en pantalla, nunca en la bitácora
 log(`🔔 Avisos: en la app ntfy suscríbete al tema ${ajustes().temaAvisos}`);
 if (youtube.configurado() && youtube.tieneSesion()) marcar('youtube', 'ok', 'Sesión guardada');
 else if (youtube.configurado()) marcar('youtube', 'aviso', 'Falta autorizar YouTube: abre http://localhost:3000/youtube en la PC');

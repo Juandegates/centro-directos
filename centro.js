@@ -2,6 +2,7 @@
 import { createServer } from 'node:http';
 import { crearBot, leerConfig } from './bot.js';
 import { crearPantalla } from './pantalla.js';
+import { crearDatos } from './datos.js';
 import * as twitch from './twitch.js';
 import { alAvisoIA } from './ia.js';
 
@@ -32,11 +33,19 @@ async function iniciarBot() {
     log,
   });
 
+  const datos = crearDatos({
+    canal,
+    log,
+    leerConfig,
+    verPantalla: () => pantalla.recientes(3),
+  });
+
   const bot = crearBot({
     log,
+    datos,
     verPantalla: () => (leerConfig().pantalla?.activa === false ? [] : pantalla.recientes(3)),
     enviar: (texto) => twitch.enviarMensaje({ canalId: canal.id, emisorId: yo.id, texto }),
-    estaEnVivo: () => twitch.estaEnVivo(canal.id),
+    estaEnVivo: async () => datos.actual().enVivo,
   });
 
   twitch.escucharChat({

@@ -1,11 +1,6 @@
 {
-  "comoSoy": "Soy [tu apodo], streamer mexicano que juega en PS5. Hablo relajado, buena onda, como gamer mexicano, con humor, sin groserias fuertes. Me gusta platicar con el chat y hacerles preguntas.",
-  "datosDelCanal": {
-    "juegoDeHoy": "[pon aqui el juego]",
-    "horario": "[pon aqui tus dias y hora]",
-    "otros": "[cualquier cosa que deba saber: tu equipo, metas del canal, etc.]",
-    "notasDelJuego": "[opcional: en qué parte vas, tu personaje, build, metas de hoy]"
-  },
+  "comoSoy": "Soy {nombre}, streamer mexicano que juega en PS5. Hablo relajado, buena onda, como gamer mexicano, con humor, sin groserias fuertes. Me gusta platicar con el chat y hacerles preguntas.",
+  "extras": "",
   "prefijo": "",
   "saludarNuevos": true,
   "segundosParaLeerChat": 6,
@@ -15,8 +10,8 @@
     "soloEnVivo": true
   },
   "comandos": {
-    "!horario": "Los directos son [pon aqui tus dias y hora]. ¡Sigue el canal para que te llegue el aviso!",
-    "!juego": "Hoy andamos jugando [pon aqui el juego].",
+    "!juego": "Ahorita andamos jugando {juego}.",
+    "!horario": "Horario de directos: {horario}. ¡Sigue el canal para que te llegue el aviso!",
     "!redes": "Sigue el canal aqui en Twitch para no perderte ningun directo."
   },
   "pantalla": {

@@ -7,19 +7,23 @@ const NADA = '(nada)';
 
 export const leerConfig = () => JSON.parse(readFileSync(new URL('./config.json', import.meta.url), 'utf8'));
 
-function instrucciones(config) {
-  const d = config.datosDelCanal ?? {};
+function instrucciones(config, d) {
+  const comoSoy = (config.comoSoy ?? '').replaceAll('{nombre}', d.nombre);
   return [
     'Eres el streamer escribiendo en su propio chat de Twitch mientras juega en vivo en la PS5. Escribes SIEMPRE en primera persona, como si fueras el, nunca digas que eres un bot o una IA.',
-    `Quien soy y como hablo: ${config.comoSoy}`,
-    `Datos del canal: juego de hoy: ${d.juegoDeHoy}. Horario: ${d.horario}. Otros: ${d.otros}.`,
-    `Notas del juego (lo que llevo, mi personaje, etc.): ${d.notasDelJuego ?? '(ninguna)'}`,
+    `Quien soy y como hablo: ${comoSoy}`,
+    `Mi canal: ${d.nombre}. ${d.enVivo ? 'Estoy EN VIVO ahora.' : 'Ahorita NO estoy en vivo.'}`,
+    `Juego actual (segun Twitch): ${d.juego}. Titulo del directo: ${d.titulo || '(sin titulo)'}.`,
+    `Mi horario: ${d.horario}.`,
+    `Notas de mi partida en este juego: ${d.notasJuego || '(todavia ninguna)'}`,
+    config.extras ? `Otros datos que debo saber: ${config.extras}` : '',
+    'Usa tu conocimiento general del juego actual para platicar (mecanicas, personajes, tips), pero no inventes cosas de mi partida.',
     'Reglas:',
     '- Mensajes cortos de chat: 1 a 3 frases, maximo 350 caracteres, en espanol mexicano natural.',
     '- Menciona con @usuario a quien le contestas. Puedes contestar a varios en un mismo mensaje.',
     '- Haz preguntas al chat para sacar platica (sobre el juego, sus gustos, de donde son).',
     '- Saluda con ganas a quien escribe por primera vez en el canal; a quien vuelve, salúdalo como a un conocido.',
-    '- No inventes datos: si no sabes algo (o un dato dice [pon aqui...]), sale por la tangente con humor sin dar el dato.',
+    '- No inventes datos: si no sabes algo, sale por la tangente con humor sin dar el dato.',
     '- Pantalla: a veces recibes imagenes de mi directo de los ultimos segundos (la ultima es la mas reciente). Si alguien pregunta o comenta algo de lo que pasa en el juego, miralas y contesta segun lo que se ve, como si lo estuvieras jugando. Si no recibes imagenes o no se alcanza a ver, contesta de forma general sin inventar detalles.',
     '- No narres la pantalla si nadie pregunta; usala solo cuando venga al caso.',
     '- Nunca prometas regalos, sorteos, dinero ni encuentros. Nada de temas polemicos, politica ni groserias fuertes.',
@@ -27,10 +31,15 @@ function instrucciones(config) {
     '- Si alguien es grosero o hace spam, ignoralo.',
     '- No repitas frases de tus mensajes anteriores.',
     `- Si nada de lo nuevo necesita respuesta (solo emotes, "jaja", spam), responde exactamente: ${NADA}`,
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
-export function crearBot({ enviar, estaEnVivo, log, verPantalla = () => [] }) {
+export function crearBot({ enviar, estaEnVivo, log, verPantalla = () => [], datos }) {
+  const rellenar = (t) => {
+    const d = datos.actual();
+    return t.replaceAll('{juego}', d.juego).replaceAll('{horario}', d.horario)
+      .replaceAll('{titulo}', d.titulo).replaceAll('{nombre}', d.nombre);
+  };
   const conocidos = new Set(existsSync(ARCHIVO_CONOCIDOS) ? JSON.parse(readFileSync(ARCHIVO_CONOCIDOS, 'utf8')) : []);
   const vistosHoy = new Set();
   const historial = []; // últimas líneas del chat, incluidas las tuyas
@@ -79,7 +88,7 @@ export function crearBot({ enviar, estaEnVivo, log, verPantalla = () => [] }) {
       `Chat reciente (contexto):\n${historial.filter((l) => !tanda.some((t) => t.plano === l)).join('\n') || '(vacio)'}\n\n` +
       `Mensajes NUEVOS que debes contestar:\n${tanda.map((t) => t.linea).join('\n')}\n\n` +
       'Escribe UN solo mensaje para el chat.';
-    await hablar(texto, instrucciones(config));
+    await hablar(texto, instrucciones(config, datos.actual()));
     ocupado = false;
   }
 
@@ -97,7 +106,7 @@ export function crearBot({ enviar, estaEnVivo, log, verPantalla = () => [] }) {
     await hablar(
       `Chat reciente:\n${historial.join('\n') || '(vacio)'}\n\nEl chat lleva un rato callado. ` +
         'Escribe UN mensaje para animar la platica: una pregunta al chat, un comentario de lo que esta pasando en el juego (si tienes imagenes) o una dinamica sencilla (por ejemplo, que voten algo). No pidas follows en cada mensaje.',
-      instrucciones(config),
+      instrucciones(config, datos.actual()),
     );
     ocupado = false;
   }
@@ -118,8 +127,8 @@ export function crearBot({ enviar, estaEnVivo, log, verPantalla = () => [] }) {
       const config = leerConfig();
       const comando = config.comandos?.[texto.trim().split(/\s+/)[0].toLowerCase()];
       if (comando) {
-        await enviar((config.prefijo ?? '') + comando).catch((e) => log('⚠️ ' + e.message));
-        log(`🗨️  Comando ${texto.trim().split(/\s+/)[0]} → ${comando}`);
+        await enviar((config.prefijo ?? '') + rellenar(comando)).catch((e) => log('⚠️ ' + e.message));
+        log(`🗨️  Comando ${texto.trim().split(/\s+/)[0]} → ${rellenar(comando)}`);
         return;
       }
 

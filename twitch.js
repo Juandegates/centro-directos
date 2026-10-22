@@ -64,6 +64,31 @@ export async function idDeUsuario(login) {
   return r.data[0];
 }
 
+export async function infoCanal(canalId) {
+  const r = await api(`channels?broadcaster_id=${canalId}`);
+  return r.data?.[0] ?? {};
+}
+
+// Horario publicado en Twitch (si lo tienes) → lista de fechas ISO.
+export async function horarioPublicado(canalId) {
+  try {
+    const r = await api(`schedule?broadcaster_id=${canalId}&first=20`);
+    return (r.data?.segments ?? []).map((s) => s.start_time);
+  } catch {
+    return []; // 404 = no hay horario publicado
+  }
+}
+
+// Fechas de inicio de tus directos pasados guardados en Twitch.
+export async function directosPasados(canalId) {
+  try {
+    const r = await api(`videos?user_id=${canalId}&type=archive&first=30`);
+    return (r.data ?? []).map((v) => v.created_at);
+  } catch {
+    return [];
+  }
+}
+
 export async function estaEnVivo(canalId) {
   const r = await api(`streams?user_id=${canalId}`);
   return Boolean(r.data?.length);

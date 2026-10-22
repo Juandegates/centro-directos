@@ -1,5 +1,5 @@
-// Conexión con la IA (Gemini, plan gratuito).
-// Si un modelo está saturado (503), tarda demasiado o llegó a su límite, prueba con el siguiente.
+// IA: primero Gemini (gratis, en la nube); si está saturado o en su límite, la IA de tu PC (Ollama).
+import { marcar } from './estado.js';
 
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const RESPALDOS = ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
@@ -8,7 +8,11 @@ const ESPERA_MAXIMA_MS = 25_000;
 let avisos = () => {};
 export const alAvisoIA = (fn) => { avisos = fn; };
 
-export async function preguntarIA({ sistema, texto, imagenes = [] }) {
+let geminiPausadoHasta = 0;
+let configIA = () => ({});
+export const configurarIA = (fn) => { configIA = fn; };
+
+async function gemini({ sistema, texto, imagenes }) {
   const clave = process.env.GEMINI_API_KEY;
   if (!clave) throw new Error('Falta GEMINI_API_KEY en claves.txt');
   const modelos = [...new Set([process.env.GEMINI_MODELO, ...RESPALDOS].filter(Boolean))];
@@ -47,22 +51,69 @@ export async function preguntarIA({ sistema, texto, imagenes = [] }) {
     if (res.ok) {
       const datos = await res.json();
       const partes = datos.candidates?.[0]?.content?.parts ?? [];
+      marcar('ia', 'ok', `Funcionando (${modelo})`);
       return partes.filter((p) => !p.thought).map((p) => p.text ?? '').join('').replace(/\s+/g, ' ').trim();
     }
 
-    const detalle = (await res.text()).slice(0, 200);
+    const detalle = (await res.text()).slice(0, 300);
     if (res.status !== 429) todosEnLimite = false;
     if ([429, 500, 503, 504, 404].includes(res.status)) {
       ultimoError = `${modelo} respondió ${res.status}`;
       avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
       continue;
     }
+    marcar('ia', 'error', `Gemini respondió ${res.status}`, detalle);
     throw new Error(`La IA respondió ${res.status}: ${detalle}`);
   }
 
-  const e = new Error(todosEnLimite
-    ? 'La IA llegó a su límite gratuito por ahora; pausa de 1 minuto.'
-    : `Ningún modelo de IA respondió (${ultimoError}); pausa de 1 minuto.`);
+  const e = new Error(todosEnLimite ? 'Gemini llegó a su límite gratuito' : `Ningún modelo de Gemini respondió (${ultimoError})`);
   e.limite = true;
   throw e;
+}
+
+async function local({ sistema, texto, imagenes }) {
+  const c = configIA().iaLocal ?? {};
+  if (!c.activa) throw new Error('IA de respaldo desactivada');
+  const res = await fetch(`${c.url ?? 'http://localhost:11434'}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: c.modelo,
+      stream: false,
+      options: { temperature: 0.9, num_predict: 300 },
+      messages: [
+        { role: 'system', content: sistema },
+        { role: 'user', content: texto, ...(imagenes.length && c.veImagenes !== false ? { images: imagenes.slice(-1).map((i) => i.base64) } : {}) },
+      ],
+    }),
+    signal: AbortSignal.timeout((c.segundosMaximos ?? 60) * 1000),
+  });
+  if (!res.ok) throw new Error(`IA de la PC respondió ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const d = await res.json();
+  return (d.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\s+/g, ' ').trim();
+}
+
+export async function preguntarIA({ sistema, texto, imagenes = [] }) {
+  let errorGemini = null;
+  if (Date.now() >= geminiPausadoHasta) {
+    try {
+      return await gemini({ sistema, texto, imagenes });
+    } catch (e) {
+      errorGemini = e;
+      if (e.limite) {
+        geminiPausadoHasta = Date.now() + 60_000;
+        marcar('ia', 'aviso', e.message + '; uso la IA de la PC por 1 minuto', e.message);
+      }
+    }
+  }
+  try {
+    const r = await local({ sistema, texto, imagenes });
+    marcar('iaLocal', 'ok', `Respondió (${configIA().iaLocal?.modelo})`);
+    return r;
+  } catch (e) {
+    if (configIA().iaLocal?.activa) marcar('iaLocal', 'error', 'La IA de la PC no respondió', e.cause?.code ?? e.message);
+    const final = new Error(errorGemini ? `${errorGemini.message}; y la IA de la PC tampoco respondió` : e.message);
+    final.limite = true;
+    throw final;
+  }
 }

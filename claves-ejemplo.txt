@@ -1,9 +1,21 @@
 # Copia este archivo como claves.txt y pon tus claves (sin espacios ni comillas).
 # claves.txt NUNCA se sube a GitHub.
 
+# --- IA (Google AI Studio) ---
 GEMINI_API_KEY=pega_aqui_tu_clave_de_gemini
 GEMINI_MODELO=gemini-flash-latest
 
+# --- Twitch (dev.twitch.tv/console/apps) ---
 TWITCH_CLIENT_ID=pega_aqui_tu_id_de_cliente
 TWITCH_CLIENT_SECRET=pega_aqui_tu_secreto_de_cliente
 TWITCH_CANAL=tu_usuario_de_twitch
+
+# --- YouTube (Google Cloud Console, opcional) ---
+GOOGLE_CLIENT_ID=pega_aqui_tu_id_de_cliente_de_google
+GOOGLE_CLIENT_SECRET=pega_aqui_tu_secreto_de_google
+
+# --- App del celular: PIN para entrar (si lo dejas así, el Centro inventa uno y lo muestra) ---
+APP_PIN=pega_aqui_un_pin
+
+# --- Actualizaciones (solo si tu repositorio de GitHub es privado) ---
+GITHUB_TOKEN=pega_aqui_tu_token_de_github

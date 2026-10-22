@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title Centro de Directos
 cd /d "%~dp0"
 :inicio

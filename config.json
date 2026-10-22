@@ -21,5 +21,24 @@
   "herramientas": {
     "streamlink": "streamlink",
     "ffmpeg": ""
+  },
+  "urlApp": "",
+  "revisarCategoria": true,
+  "clips": {
+    "automaticos": true,
+    "segundos": 40,
+    "minutosEntreClips": 3,
+    "minimoMensajes": 5,
+    "minimoReacciones": 4
+  },
+  "youtube": {
+    "segundosEntreLecturas": 10
+  },
+  "iaLocal": {
+    "activa": false,
+    "url": "http://localhost:11434",
+    "modelo": "gemma3:4b",
+    "veImagenes": true,
+    "segundosMaximos": 60
   }
 }

@@ -1,24 +1,33 @@
-# Centro de Directos
+# Centro de Directos · v2
 
-Fase 1: bot de IA (Gemini, plan gratis) que maneja tu chat de Twitch como si fueras tú.
+Todo automático para tus directos de PS5: tú solo le das **Transmitir** en la PS5 y la PC hace lo demás.
 
-## Uso en Windows
+## Qué hace solo
 
-0. Instala [Streamlink](https://streamlink.github.io/install.html) para Windows (trae FFmpeg): así el bot ve tu directo.
-1. Copia `claves-ejemplo.txt` como `claves.txt` y pon tus claves.
-2. (Opcional) Ajusta `config.json`: cómo hablas y datos extra. El juego, título y horario los saca solo de Twitch.
-3. En esta carpeta: `npm run prueba-ia` (prueba la IA).
-4. Doble clic en `iniciar-centro.bat` (se reinicia solo si se cierra). La primera vez abre http://localhost:3000 para iniciar sesión en Twitch.
+- Arranca con Windows y detecta al instante cuando sales en vivo en Twitch (y cuando terminas).
+- **Bot de IA** en el chat de Twitch y de YouTube: habla como tú, saluda a los nuevos, contesta, saca plática y ve tu pantalla.
+- **YouTube en vivo**: crea el directo con tu título y le manda la misma señal de Twitch.
+- **Clips**: detecta los mejores momentos (el chat explota, reacciones, `!clip`), crea el clip en Twitch y arma un video vertical (TikTok/Shorts) y uno horizontal, con textos y hashtags.
+- **Promoción**: anuncio de "estoy en vivo" y resumen al terminar, listos para X.
+- **Aprende solo**: juego y título de Twitch, tu horario y notas de tu partida; te avisa si la categoría no coincide con lo que se ve.
+- **Avisos al celular** (ntfy) de todo lo importante y de cualquier falla.
+- **IA de respaldo** en tu PC (Ollama), opcional, si Gemini se satura.
 
-## Qué hace
+## App del celular
 
-- Lee el chat por tandas (cada 6 s) y contesta todo en un mensaje, en primera persona, con @menciones.
-- Saluda a quien escribe por primera vez en el canal y a los conocidos cuando vuelven.
-- Si el chat lleva 5 minutos callado y estás en vivo, manda algo para sacar plática.
-- Mientras estás en vivo, toma una imagen de tu directo cada 2 s y se la pasa a la IA para contestar lo que pregunten del juego.
-- Saca solo de Twitch el juego y el título; aprende tu horario de tus directos y toma notas de tu partida viendo la pantalla cada 5 min (en `memoria.json`).
-- Comandos en `config.json` (`!horario`, `!juego`, `!redes`).
-- Nunca contesta tus propios mensajes; los usa como contexto.
-- Puedes cambiar `config.json` sin reiniciar.
+`http://<tu-pc>:3000` (o la dirección de Tailscale). Pide el PIN que muestra la ventana del Centro.
 
-`claves.txt`, `tokens.json`, `conocidos.json` y `memoria.json` nunca se suben a GitHub.
+- **En vivo**: estado, espectadores, cambiar título y categoría, encender/apagar YouTube y los bots, hacer clip.
+- **Chat**: Twitch y YouTube juntos; escribir como tú.
+- **Publicar**: clips y posts listos; descargar, copiar texto, publicar en X.
+- **Diagnóstico**: semáforo por parte, **Probar todo**, **Copiar reporte** (sin claves), actualizar.
+
+## Instalación en Windows
+
+1. Instala Node.js (LTS) y [Streamlink](https://github.com/streamlink/windows-builds/releases/latest).
+2. Copia `claves-ejemplo.txt` como `claves.txt` y pon tus claves.
+3. Doble clic en `iniciar-centro.bat`. La primera vez abre http://localhost:3000/twitch en la PC.
+4. (Opcional) `instalar-inicio-automatico.bat` para que arranque solo con Windows.
+5. (Opcional) YouTube: pon `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` y abre http://localhost:3000/youtube en la PC.
+
+Nunca se suben a GitHub: `claves.txt`, `tokens.json`, `google-tokens.json`, `ajustes.json`, `memoria.json`, `conocidos.json`, `bandeja.json`, `grabacion/`, `clips/`.

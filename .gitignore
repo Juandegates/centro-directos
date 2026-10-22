@@ -4,3 +4,8 @@ conocidos.json
 node_modules/
 *.log
 memoria.json
+google-tokens.json
+ajustes.json
+bandeja.json
+grabacion/
+clips/

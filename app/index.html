@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101114">
+<title>Centro de Directos</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icono.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icono.svg">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+
+<section id="pantalla-pin" class="pin" hidden>
+  <h1>Centro de Directos</h1>
+  <p class="tenue">Escribe el PIN que aparece en la ventana del Centro en tu PC.</p>
+  <form id="form-pin">
+    <label for="pin" class="oculto">PIN</label>
+    <input id="pin" inputmode="numeric" autocomplete="one-time-code" placeholder="PIN" required>
+    <button type="submit" class="primario">Entrar</button>
+  </form>
+  <p id="pin-error" class="error" role="alert"></p>
+</section>
+
+<div id="app" hidden>
+  <header class="cabecera">
+    <div>
+      <span class="sobretitulo">Centro de Directos</span>
+      <h1 id="titulo-seccion">En vivo</h1>
+    </div>
+    <span id="estado-vivo" class="pastilla">Sin directo</span>
+  </header>
+
+  <main>
+    <!-- EN VIVO -->
+    <section id="vivo" class="vista">
+      <div id="aviso-sesion" class="banner error" hidden></div>
+      <div id="sugerencia" class="banner" hidden></div>
+
+      <article class="tarjeta">
+        <div class="fila entre"><span class="tenue">Origen</span><span class="tenue">Espectadores</span></div>
+        <div class="fila entre fin">
+          <div><strong class="grande">PS5 → Twitch</strong><div id="juego-actual" class="tenue">—</div></div>
+          <strong id="espectadores" class="enorme">0</strong>
+        </div>
+        <div id="tiempo-vivo" class="tenue"></div>
+      </article>
+
+      <article class="tarjeta">
+        <h2>Título y categoría</h2>
+        <label for="campo-titulo">Título (Twitch y YouTube)</label>
+        <input id="campo-titulo" maxlength="140">
+        <label for="campo-categoria">Categoría de Twitch</label>
+        <input id="campo-categoria" placeholder="Busca un juego…" autocomplete="off">
+        <ul id="resultados-categoria" class="resultados"></ul>
+        <button id="guardar-canal" class="primario ancho">Guardar cambios</button>
+        <p id="canal-mensaje" class="tenue" role="status"></p>
+      </article>
+
+      <h2 class="titulo-lista">Plataformas</h2>
+      <article class="tarjeta lista">
+        <div class="fila"><span class="punto twitch"></span><div class="crece"><strong>Twitch</strong><div id="twitch-estado" class="tenue">—</div></div><span id="twitch-pastilla" class="pastilla chica">—</span></div>
+        <div class="fila"><span class="punto youtube"></span><div class="crece"><strong>YouTube</strong><div id="youtube-estado" class="tenue">—</div></div>
+          <button class="interruptor" id="interruptor-youtube" role="switch" aria-checked="false" aria-label="Enviar directo a YouTube"><span></span></button></div>
+        <div class="fila"><span class="punto tiktok"></span><div class="crece"><strong>TikTok</strong><div class="tenue">Clips listos en Publicar · en vivo al llegar a 1,000</div></div></div>
+      </article>
+
+      <h2 class="titulo-lista">Bot IA</h2>
+      <article class="tarjeta lista">
+        <div class="fila"><div class="crece"><strong>Bot en Twitch</strong><div class="tenue">Contesta como si fueras tú</div></div>
+          <button class="interruptor" id="bot-twitch" role="switch" aria-checked="true" aria-label="Bot en Twitch"><span></span></button></div>
+        <div class="fila"><div class="crece"><strong>Bot en YouTube</strong><div class="tenue">Mismo cerebro, cuida la cuota diaria</div></div>
+          <button class="interruptor" id="bot-youtube" role="switch" aria-checked="true" aria-label="Bot en YouTube"><span></span></button></div>
+      </article>
+
+      <button id="hacer-clip" class="secundario ancho">🎬 Hacer clip ahora</button>
+      <p id="clip-mensaje" class="tenue centro" role="status"></p>
+    </section>
+
+    <!-- CHAT -->
+    <section id="chat" class="vista" hidden>
+      <div class="chips" role="group" aria-label="Filtrar">
+        <button class="chip activo" data-filtro="todas">Todos</button>
+        <button class="chip" data-filtro="twitch"><span class="punto twitch"></span>Twitch</button>
+        <button class="chip" data-filtro="youtube"><span class="punto youtube"></span>YouTube</button>
+      </div>
+      <ol id="mensajes" class="mensajes"></ol>
+      <form id="form-chat" class="enviar">
+        <label for="destino" class="oculto">Enviar a</label>
+        <select id="destino"><option value="todas">Todas</option><option value="twitch">Twitch</option><option value="youtube">YouTube</option></select>
+        <label for="texto-chat" class="oculto">Mensaje</label>
+        <input id="texto-chat" placeholder="Escribe como tú" autocomplete="off">
+        <button class="primario icono" aria-label="Enviar">➤</button>
+      </form>
+    </section>
+
+    <!-- PUBLICAR -->
+    <section id="publicar" class="vista" hidden>
+      <p class="tenue">Clips y posts que preparó el Centro. Publica con un toque y márcalos como hechos.</p>
+      <div id="bandeja"></div>
+    </section>
+
+    <!-- DIAGNÓSTICO -->
+    <section id="diagnostico" class="vista" hidden>
+      <article class="tarjeta lista" id="semaforos"></article>
+      <div class="fila botones">
+        <button id="probar-todo" class="primario crece">Probar todo</button>
+        <button id="copiar-reporte" class="secundario crece">Copiar reporte</button>
+      </div>
+      <p id="diag-mensaje" class="tenue" role="status"></p>
+      <ol id="resultados-prueba" class="pruebas"></ol>
+
+      <h2 class="titulo-lista">Avisos al celular</h2>
+      <article class="tarjeta">
+        <p>Instala la app <strong>ntfy</strong> y suscríbete a este tema:</p>
+        <p class="codigo" id="tema-avisos">—</p>
+        <a id="link-ntfy" class="secundario ancho boton" href="#">Abrir en ntfy</a>
+      </article>
+
+      <h2 class="titulo-lista">Versión</h2>
+      <article class="tarjeta">
+        <p id="version-texto">—</p>
+        <button id="actualizar" class="secundario ancho">Buscar actualización</button>
+      </article>
+
+      <details class="tarjeta">
+        <summary>Ver bitácora</summary>
+        <ol id="bitacora" class="bitacora"></ol>
+      </details>
+    </section>
+  </main>
+
+  <nav class="navegacion" aria-label="Secciones">
+    <a href="#vivo" data-vista="vivo"><span aria-hidden="true">◉</span>En vivo</a>
+    <a href="#chat" data-vista="chat"><span aria-hidden="true">💬</span>Chat</a>
+    <a href="#publicar" data-vista="publicar"><span aria-hidden="true">📣</span>Publicar<b id="contador-bandeja" hidden></b></a>
+    <a href="#diagnostico" data-vista="diagnostico"><span aria-hidden="true">🩺</span>Diagnóstico<b id="contador-fallas" hidden></b></a>
+  </nav>
+</div>
+
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

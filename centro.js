@@ -3,9 +3,11 @@ import { createServer } from 'node:http';
 import { crearBot, leerConfig } from './bot.js';
 import { crearPantalla } from './pantalla.js';
 import * as twitch from './twitch.js';
+import { alAvisoIA } from './ia.js';
 
 const hora = () => new Date().toLocaleTimeString('es-MX', { hour12: false });
 const log = (t) => console.log(`[${hora()}] ${t}`);
+alAvisoIA(log);
 
 for (const k of ['GEMINI_API_KEY', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'TWITCH_CANAL']) {
   if (!process.env[k] || process.env[k].startsWith('pega_aqui') || process.env[k] === 'tu_usuario_de_twitch') {

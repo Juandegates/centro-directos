@@ -1,5 +1,7 @@
 // Prueba rápida: confirma que la clave de Gemini funciona y cómo suena el bot.
-import { preguntarIA } from './ia.js';
+import { preguntarIA, alAvisoIA } from './ia.js';
+alAvisoIA((t) => console.log('   ' + t));
+console.log('\nPreguntando a la IA…');
 import { leerConfig } from './bot.js';
 
 const config = leerConfig();

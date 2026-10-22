@@ -1,0 +1,9 @@
+# Copia este archivo como claves.txt y pon tus claves (sin espacios ni comillas).
+# claves.txt NUNCA se sube a GitHub.
+
+GEMINI_API_KEY=pega_aqui_tu_clave_de_gemini
+GEMINI_MODELO=gemini-flash-latest
+
+TWITCH_CLIENT_ID=pega_aqui_tu_id_de_cliente
+TWITCH_CLIENT_SECRET=pega_aqui_tu_secreto_de_cliente
+TWITCH_CANAL=tu_usuario_de_twitch

@@ -1,0 +1,14 @@
+{
+  "name": "centro-directos",
+  "version": "0.1.0",
+  "description": "Centro de Directos: bot de IA para el chat de Twitch (Fase 1)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node --env-file=claves.txt centro.js",
+    "prueba-ia": "node --env-file=claves.txt prueba-ia.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

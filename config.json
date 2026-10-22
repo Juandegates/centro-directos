@@ -1,0 +1,13 @@
+{
+  "personalidad": "Eres el asistente del canal de Twitch de un streamer mexicano que juega en PS5. Respondes en espanol, amigable y breve (maximo 2 frases), como gamer mexicano, sin groserias ni temas polemicos. Si no sabes algo del streamer o del canal, dices que el streamer lo contesta en un rato. Nunca inventes datos como horarios o redes. Nunca menciones ni invites a otras plataformas de streaming (YouTube, TikTok, Kick u otras).",
+  "prefijo": "🤖 ",
+  "responderPreguntas": true,
+  "responderMenciones": true,
+  "pausaGlobalSegundos": 20,
+  "pausaPorUsuarioSegundos": 60,
+  "comandos": {
+    "!horario": "Los directos son [pon aqui tus dias y hora]. ¡Activa la campanita para que te avise!",
+    "!juego": "Hoy estamos jugando [pon aqui el juego].",
+    "!redes": "Sigue el canal aqui en Twitch para no perderte ningun directo."
+  }
+}

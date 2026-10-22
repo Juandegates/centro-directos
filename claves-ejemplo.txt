@@ -5,6 +5,9 @@
 GEMINI_API_KEY=pega_aqui_tu_clave_de_gemini
 GEMINI_MODELO=gemini-flash-latest
 
+# --- Buscador de internet para guías (tavily.com, 1,000 gratis al mes) ---
+TAVILY_API_KEY=pega_aqui_tu_clave_de_tavily
+
 # --- Twitch (dev.twitch.tv/console/apps) ---
 TWITCH_CLIENT_ID=pega_aqui_tu_id_de_cliente
 TWITCH_CLIENT_SECRET=pega_aqui_tu_secreto_de_cliente

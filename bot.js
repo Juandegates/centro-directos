@@ -1,6 +1,7 @@
 // Cerebro del bot: lee el chat por tandas y contesta como si fueras tú. Una copia por plataforma.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { preguntarIA } from './ia.js';
+import { buscar as buscarEnInternet, armarConsulta, resumenParaIA, buscadorConfigurado } from './buscador.js';
 import { log } from './estado.js';
 import { registrar } from './chat.js';
 import { ajustes } from './ajustes.js';
@@ -44,9 +45,9 @@ function instrucciones(config, d, plataforma) {
     '- No repitas frases de tus mensajes anteriores.',
     '',
     'INFORMACION DEL JUEGO:',
-    '- Si preguntan algo del juego (guias, finales, jefes, secretos, como conseguir algo), contesta con datos reales usando lo que sabes o lo que encuentres al buscar.',
-    '- Cuenta de donde lo sacaste como en una platica: "lei en una guia que...", "vi un video donde...", "mucha gente comenta que...", "en los foros dicen que...". NUNCA pongas links, nombres de paginas web, numeros de referencia ni la palabra "fuente".',
-    '- Si no estas seguro, dilo con naturalidad ("no me acuerdo bien, pero creo que...") y no inventes.',
+    '- Cuando recibas RESULTADOS DE BUSQUEDA, usa esos datos para contestar y cuentalo como platica: "lei en una guia que...", "vi un video donde...", "mucha gente comenta que...". NUNCA pongas links, nombres de paginas web, numeros de referencia ni la palabra "fuente".',
+    '- Usa solo datos que correspondan al juego exacto que preguntan; no los mezcles con otros juegos de la misma saga.',
+    '- Si NO recibiste resultados de busqueda: NO digas que leiste, viste o checaste guias, videos o foros. Contesta con lo que sepas con certeza, o dilo con naturalidad ("si no me falla la memoria...", "no estoy seguro, ahorita no me acuerdo"). Si el juego es muy nuevo y no tienes el dato, admitelo; NUNCA inventes datos concretos (finales, pasos, ubicaciones).',
     '- Pantalla: a veces recibes imagenes de mi directo de los ultimos segundos (la ultima es la mas reciente). Si preguntan o comentan algo de lo que pasa en el juego, miralas y contesta segun lo que se ve, como si lo estuvieras jugando. No narres la pantalla si nadie pregunta.',
     '',
     'LIMITES (obligatorios):',
@@ -138,11 +139,11 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
     recordar(`YO: ${texto}`);
   }
 
-  async function hablar(texto, sistema, { buscar = false } = {}) {
+  async function hablar(texto, sistema) {
     try {
       const imagenes = verPantalla();
       if (imagenes.length) texto += `\n\n(Te adjunto ${imagenes.length} imagenes de mi directo de los ultimos segundos.)`;
-      const r = await preguntarIA({ sistema, texto, imagenes, buscar });
+      const r = await preguntarIA({ sistema, texto, imagenes });
       if (!r || r.includes(NADA) || pausado()) return;
       const limpio = limpiarRespuesta(r);
       if (!limpio) {
@@ -162,12 +163,20 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
     ocupado = true;
     const tanda = pendientes;
     pendientes = [];
+    // Si alguien pregunta algo del juego (guías, finales, jefes…), buscamos en internet primero.
+    let busqueda = '';
+    const pregunta = tanda.find((t) => PIDE_INFO.test(t.plano));
+    if (pregunta && leerConfig().buscarEnInternet !== false && buscadorConfigurado()) {
+      const d = datos.actual();
+      const r = await buscarEnInternet(armarConsulta(pregunta.plano.replace(/^@\S+:\s*/, ''), d.juego));
+      if (r?.resultados.length) busqueda = `RESULTADOS DE BUSQUEDA en internet sobre "${d.juego}" (usalos para los datos concretos):\n${resumenParaIA(r)}\n\n`;
+    }
     const texto =
       `Chat reciente (contexto):\n${historial.filter((l) => !tanda.some((t) => t.plano === l)).join('\n') || '(vacio)'}\n\n` +
+      (busqueda || (pregunta ? 'NO hay resultados de busqueda para esta pregunta: no digas que leiste o viste guias.\n\n' : '')) +
       `Mensajes NUEVOS que debes contestar:\n${tanda.map((t) => t.linea).join('\n')}\n\n` +
       'Escribe UN solo mensaje para el chat (puede ser largo si explicas algo del juego).';
-    const buscar = leerConfig().buscarEnInternet !== false && tanda.some((t) => PIDE_INFO.test(t.plano));
-    await hablar(texto, instrucciones(leerConfig(), datos.actual(), plataforma), { buscar });
+    await hablar(texto, instrucciones(leerConfig(), datos.actual(), plataforma));
     ocupado = false;
   }
 

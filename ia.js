@@ -3,7 +3,8 @@ import { marcar } from './estado.js';
 
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const PREFERIDOS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
-const ESPERA_MAXIMA_MS = 12_000;
+const ESPERA_MAXIMA_MS = 9_000;  // por modelo
+const ESPERA_TOTAL_MS = 16_000;  // entre todos los modelos
 
 let avisos = () => {};
 export const alAvisoIA = (fn) => { avisos = fn; };
@@ -64,17 +65,20 @@ async function gemini({ sistema, texto, imagenes, buscar }) {
   let ultimoError = '';
   const fases = buscar && Date.now() > busquedaPausadaHasta ? [true, false] : [false];
 
+  const limite = Date.now() + ESPERA_TOTAL_MS; // nunca esperar más de esto en total
   for (const conBusqueda of fases) {
     let erroresDeBusqueda = 0;
     for (const modelo of modelos) {
       if (castigados.get(modelo) > Date.now() && modelos.some((m) => !(castigados.get(m) > Date.now()))) continue;
+      const queda = limite - Date.now();
+      if (queda < 2500) { ultimoError = ultimoError || 'se acabó el tiempo de espera'; todosEnLimite = false; break; }
       let res;
       try {
         res = await fetch(`${URL_BASE}/${modelo}:generateContent`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
           body: armar(conBusqueda),
-          signal: AbortSignal.timeout(conBusqueda ? 25_000 : ESPERA_MAXIMA_MS),
+          signal: AbortSignal.timeout(Math.min(conBusqueda ? 25_000 : ESPERA_MAXIMA_MS, queda)),
         });
       } catch (e) {
         todosEnLimite = false;

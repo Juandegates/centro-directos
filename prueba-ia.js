@@ -1,12 +1,14 @@
-// Prueba rápida: confirma que la clave de Gemini funciona.
-import { readFileSync } from 'node:fs';
+// Prueba rápida: confirma que la clave de Gemini funciona y cómo suena el bot.
 import { preguntarIA } from './ia.js';
+import { leerConfig } from './bot.js';
 
-const config = JSON.parse(readFileSync(new URL('./config.json', import.meta.url), 'utf8'));
-
+const config = leerConfig();
 try {
-  const r = await preguntarIA({ personalidad: config.personalidad, mensaje: 'hola, ¿qué onda con el directo?' });
-  console.log('\n✅ La IA funciona. Respondió:\n');
+  const r = await preguntarIA({
+    sistema: `Eres el streamer escribiendo en su chat de Twitch, en primera persona. Quien soy: ${config.comoSoy}. Mensajes cortos de 1 a 2 frases.`,
+    texto: 'Mensajes NUEVOS que debes contestar:\n@Visitante [PRIMERA VEZ EN EL CANAL]: hola, ¿qué onda?\n\nEscribe UN solo mensaje para el chat.',
+  });
+  console.log('\n✅ La IA funciona. Así contestaría en tu chat:\n');
   console.log('   ' + r + '\n');
 } catch (e) {
   console.log('\n❌ La IA no respondió: ' + e.message + '\n');

@@ -1,7 +1,6 @@
-// Centro de Directos · Fase 1: bot de IA para el chat de Twitch.
+// Centro de Directos · Fase 1: bot de IA que maneja tu chat de Twitch como si fueras tú.
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
-import { preguntarIA } from './ia.js';
+import { crearBot } from './bot.js';
 import * as twitch from './twitch.js';
 
 const hora = () => new Date().toLocaleTimeString('es-MX', { hour12: false });
@@ -14,70 +13,31 @@ for (const k of ['GEMINI_API_KEY', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', '
   }
 }
 
-const leerConfig = () => JSON.parse(readFileSync(new URL('./config.json', import.meta.url), 'utf8'));
-
-// ---------- Lógica del bot ----------
-let ultimaRespuesta = 0;
-const ultimaPorUsuario = new Map();
-const historial = [];
-
-function debeResponder(texto, config, botLogin) {
-  const t = texto.toLowerCase();
-  if (config.responderMenciones && t.includes('@' + botLogin.toLowerCase())) return true;
-  if (config.responderPreguntas && texto.includes('?')) return true;
-  return false;
-}
+let iniciado = false;
 
 async function iniciarBot() {
+  if (iniciado) return;
+  iniciado = true;
   const yo = await twitch.idDeUsuario();
   const canal = await twitch.idDeUsuario(process.env.TWITCH_CANAL);
   log(`Sesión de Twitch: ${yo.display_name} · Canal: ${canal.display_name}`);
+
+  const bot = crearBot({
+    log,
+    enviar: (texto) => twitch.enviarMensaje({ canalId: canal.id, emisorId: yo.id, texto }),
+    estaEnVivo: () => twitch.estaEnVivo(canal.id),
+  });
 
   twitch.escucharChat({
     canalId: canal.id,
     lectorId: yo.id,
     alEstado: log,
-    alMensaje: async (ev) => {
+    alMensaje: (ev) => {
       const texto = ev.message?.text ?? '';
-      const quien = ev.chatter_user_name;
-      historial.push(`${quien}: ${texto}`);
-      if (historial.length > 10) historial.shift();
-      log(`💬 ${quien}: ${texto}`);
-
-      // Con tu propia cuenta, el bot nunca contesta tus mensajes (ni los suyos).
-      if (ev.chatter_user_id === yo.id) return;
-
-      const config = leerConfig();
-      const ahora = Date.now();
-      const comando = config.comandos?.[texto.trim().split(/\s+/)[0].toLowerCase()];
-
-      const responder = async (respuesta) => {
-        await twitch.enviarMensaje({
-          canalId: canal.id,
-          emisorId: yo.id,
-          texto: (config.prefijo ?? '') + respuesta,
-          responderA: ev.message_id,
-        });
-        ultimaRespuesta = ahora;
-        ultimaPorUsuario.set(ev.chatter_user_id, ahora);
-        log(`🤖 → ${quien}: ${respuesta}`);
-      };
-
-      try {
-        if (comando) return await responder(comando);
-        if (!debeResponder(texto, config, yo.login)) return;
-        if (ahora - ultimaRespuesta < config.pausaGlobalSegundos * 1000) return;
-        if (ahora - (ultimaPorUsuario.get(ev.chatter_user_id) ?? 0) < config.pausaPorUsuarioSegundos * 1000) return;
-
-        const respuesta = await preguntarIA({
-          personalidad: config.personalidad,
-          contexto: historial.slice(0, -1).join('\n'),
-          mensaje: `${quien}: ${texto}`,
-        });
-        if (respuesta) await responder(respuesta);
-      } catch (e) {
-        log('⚠️ ' + e.message);
-      }
+      const esMio = ev.chatter_user_id === yo.id;
+      if (!esMio) log(`💬 ${ev.chatter_user_name}: ${texto}`);
+      bot.recibir({ usuarioId: ev.chatter_user_id, nombre: ev.chatter_user_name, texto, esMio })
+        .catch((e) => log('⚠️ ' + e.message));
     },
   });
 }

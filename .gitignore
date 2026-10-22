@@ -1,4 +1,5 @@
 claves.txt
 tokens.json
+conocidos.json
 node_modules/
 *.log

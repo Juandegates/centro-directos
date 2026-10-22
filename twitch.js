@@ -64,6 +64,11 @@ export async function idDeUsuario(login) {
   return r.data[0];
 }
 
+export async function estaEnVivo(canalId) {
+  const r = await api(`streams?user_id=${canalId}`);
+  return Boolean(r.data?.length);
+}
+
 export async function enviarMensaje({ canalId, emisorId, texto, responderA }) {
   const r = await api('chat/messages', {
     method: 'POST',

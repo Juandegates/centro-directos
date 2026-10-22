@@ -226,7 +226,8 @@ function pintarMensaje(m) {
   li.className = m.tipo;
   li.dataset.plataforma = m.plataforma;
   li.hidden = filtroChat !== 'todas' && filtroChat !== m.plataforma;
-  const nombre = m.tipo === 'bot' ? `Bot IA · ${NOMBRE_PLAT[m.plataforma]}` : m.tipo === 'yo' ? `Tú · ${NOMBRE_PLAT[m.plataforma]}` : m.nombre;
+  const canal = estado?.canal ?? 'Tú';
+  const nombre = m.tipo === 'bot' ? `${canal} · bot · ${NOMBRE_PLAT[m.plataforma]}` : m.tipo === 'yo' ? `${canal} · tú · ${NOMBRE_PLAT[m.plataforma]}` : m.nombre;
   li.innerHTML = `${m.tipo === 'bot' ? '' : `<span class="punto ${esc(m.plataforma)}"></span>`}<div><div class="nombre">${esc(nombre)}</div><div>${esc(m.texto)}</div></div>`;
   $('#mensajes').appendChild(li);
 }

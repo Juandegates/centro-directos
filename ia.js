@@ -34,6 +34,9 @@ async function modelosDisponibles(clave) {
 // así el bot contesta en segundos aunque Google tenga algún modelo saturado.
 const castigados = new Map(); // modelo → hasta cuándo no usarlo
 let ultimoBueno = null;
+let busquedaPausadaHasta = 0;
+export let ultimaBusqueda = { hora: 0, consultas: [], modelo: null, error: null };
+export const reactivarBusqueda = () => { busquedaPausadaHasta = 0; };
 const castigar = (modelo, minutos) => castigados.set(modelo, Date.now() + minutos * 60_000);
 
 async function gemini({ sistema, texto, imagenes, buscar }) {
@@ -50,7 +53,7 @@ async function gemini({ sistema, texto, imagenes, buscar }) {
       role: 'user',
       parts: [
         ...imagenes.map((i) => ({ inline_data: { mime_type: i.mime, data: i.base64 } })),
-        { text: texto },
+        { text: conBusqueda ? texto + '\n\n(Antes de contestar, busca en Google la informacion del juego que te preguntan y usala.)' : texto },
       ],
     }],
     ...(conBusqueda ? { tools: [{ google_search: {} }] } : {}),
@@ -59,46 +62,63 @@ async function gemini({ sistema, texto, imagenes, buscar }) {
 
   let todosEnLimite = true;
   let ultimoError = '';
+  const fases = buscar && Date.now() > busquedaPausadaHasta ? [true, false] : [false];
 
-  for (const modelo of modelos) {
-    let conBusqueda = buscar;
-    for (let intento = 0; intento < 2; intento++) {
+  for (const conBusqueda of fases) {
+    let erroresDeBusqueda = 0;
+    for (const modelo of modelos) {
+      if (castigados.get(modelo) > Date.now() && modelos.some((m) => !(castigados.get(m) > Date.now()))) continue;
       let res;
       try {
         res = await fetch(`${URL_BASE}/${modelo}:generateContent`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
           body: armar(conBusqueda),
-          signal: AbortSignal.timeout(conBusqueda ? 20_000 : ESPERA_MAXIMA_MS),
+          signal: AbortSignal.timeout(conBusqueda ? 25_000 : ESPERA_MAXIMA_MS),
         });
       } catch (e) {
         todosEnLimite = false;
         ultimoError = e.name === 'TimeoutError' ? `${modelo} tardó demasiado` : `${modelo}: ${e.cause?.code ?? e.message}`;
-        castigar(modelo, 10);
+        if (!conBusqueda) castigar(modelo, 10);
         avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
-        break;
+        continue;
       }
 
       if (res.ok) {
         const datos = await res.json();
-        const partes = datos.candidates?.[0]?.content?.parts ?? [];
+        const cand = datos.candidates?.[0];
+        const partes = cand?.content?.parts ?? [];
         ultimoBueno = modelo;
+        const consultas = cand?.groundingMetadata?.webSearchQueries ?? [];
+        if (conBusqueda) {
+          ultimaBusqueda = { hora: Date.now(), consultas, modelo, error: null };
+          avisos(consultas.length ? `🔎 Busqué en Google: ${consultas.join(' | ')}` : '🔎 La IA tenía la búsqueda disponible pero decidió no buscar');
+        }
         marcar('ia', 'ok', `Funcionando (${modelo}${conBusqueda ? ' + búsqueda' : ''})`);
         return partes.filter((p) => !p.thought).map((p) => p.text ?? '').join('').replace(/\s+/g, ' ').trim();
       }
 
       const detalle = (await res.text()).slice(0, 300);
-      // Si la búsqueda en Google no está disponible (o se acabó su cuota), repetimos sin búsqueda.
-      if (conBusqueda && [400, 429].includes(res.status)) { conBusqueda = false; continue; }
+      if (conBusqueda && [400, 403, 429].includes(res.status)) {
+        // Este modelo no deja buscar (o se acabó la cuota de búsqueda): probamos la búsqueda en otro modelo.
+        erroresDeBusqueda++;
+        ultimaBusqueda = { hora: Date.now(), consultas: [], modelo, error: `${res.status}: ${detalle}` };
+        avisos(`🔎 ${modelo} no permitió buscar (${res.status}); pruebo la búsqueda en otro modelo…`);
+        continue;
+      }
       if (res.status !== 429) todosEnLimite = false;
       if ([429, 500, 503, 504, 404].includes(res.status)) {
         ultimoError = `${modelo} respondió ${res.status}`;
         castigar(modelo, res.status === 404 ? 24 * 60 : 10);
         avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
-        break;
+        continue;
       }
       marcar('ia', 'error', `Gemini respondió ${res.status}`, detalle);
       throw new Error(`La IA respondió ${res.status}: ${detalle}`);
+    }
+    if (conBusqueda) {
+      if (erroresDeBusqueda) busquedaPausadaHasta = Date.now() + 30 * 60_000;
+      marcar('ia', 'aviso', 'La búsqueda en Google no está disponible ahorita; contesto sin buscar', ultimaBusqueda.error ?? ultimoError);
     }
   }
 

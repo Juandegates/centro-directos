@@ -29,7 +29,9 @@ function instrucciones(config, d, plataforma) {
     `Mi canal: ${d.nombre}. ${d.enVivo ? 'Estoy EN VIVO ahora.' : 'Ahorita NO estoy en vivo.'}`,
     `Juego actual: ${d.juego}. Titulo del directo: ${d.titulo || '(sin titulo)'}.`,
     `Mi horario: ${d.horario}.`,
-    `Mis directos anteriores (del mas reciente al mas viejo): ${d.directosPasados || '(no tengo registro todavia)'}.`,
+    d.directosPasados
+      ? `Mis directos anteriores (del mas reciente al mas viejo): ${d.directosPasados}.`
+      : 'Mis directos anteriores: NO tengo registro de ellos (ya he hecho directos antes). Si preguntan por directos pasados, NUNCA digas que es mi primer directo ni inventes juegos: di con naturalidad que no te acuerdas bien o platica del juego de hoy.',
     `Notas de mi partida en este juego: ${d.notasJuego || '(todavia ninguna)'}`,
     config.extras ? `Otros datos que debo saber: ${config.extras}` : '',
     '',

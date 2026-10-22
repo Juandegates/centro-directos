@@ -3,7 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { statfsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { rutaFfmpeg, rutaStreamlink } from './herramientas.js';
-import { preguntarIA } from './ia.js';
+import { preguntarIA, reactivarBusqueda } from './ia.js';
+import * as ia from './ia.js';
 import * as twitch from './twitch.js';
 import * as youtube from './youtube.js';
 import { avisar } from './avisos.js';
@@ -61,6 +62,16 @@ export async function probarTodo({ leerConfig, canalId }) {
   resultados.push(await prueba('IA (Gemini o respaldo)', async () => {
     const r = await preguntarIA({ sistema: 'Responde con una sola palabra.', texto: 'Di: listo' });
     return `Respondió: ${r.slice(0, 40)}`;
+  }));
+  resultados.push(await prueba('Búsqueda en Google (para guías del juego)', async () => {
+    reactivarBusqueda();
+    const antes = ia.ultimaBusqueda.hora;
+    const r = await preguntarIA({ sistema: 'Contesta en una frase corta en espanol.', texto: '¿Cual es la fecha de hoy y una noticia de videojuegos de esta semana?', buscar: true });
+    const b = ia.ultimaBusqueda;
+    if (b.hora === antes) throw new Error('No se intentó buscar');
+    if (b.error) throw new Error('Google no permitió buscar: ' + b.error.slice(0, 150));
+    if (!b.consultas.length) throw new Error('La IA no usó la búsqueda (respondió: ' + r.slice(0, 60) + ')');
+    return `Buscó: ${b.consultas.slice(0, 2).join(' | ')}`;
   }));
   if (config.iaLocal?.activa) {
     resultados.push(await prueba('IA de la PC (Ollama)', async () => {

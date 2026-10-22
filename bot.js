@@ -1,7 +1,7 @@
 // Cerebro del bot: lee el chat por tandas y contesta como si fueras tú. Una copia por plataforma.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { preguntarIA } from './ia.js';
-import { buscar as buscarEnInternet, armarConsulta, resumenParaIA, buscadorConfigurado } from './buscador.js';
+import { buscarCompleto, armarConsulta, resumenParaIA, buscadorConfigurado } from './buscador.js';
 import { log } from './estado.js';
 import { registrar } from './chat.js';
 import { ajustes } from './ajustes.js';
@@ -20,6 +20,8 @@ const conocidos = new Set((existsSync(ARCHIVO_CONOCIDOS) ? JSON.parse(readFileSy
 const guardarConocidos = () => writeFileSync(ARCHIVO_CONOCIDOS, JSON.stringify([...conocidos]));
 
 // ¿El mensaje pregunta algo del juego que convenga buscar (guías, finales, jefes, tips)?
+// ¿Pide más detalle de lo que se acaba de platicar? ("más específico", "y el otro final", "cómo exactamente"…)
+const SEGUIMIENTO = /m[aá]s (detalle|espec[ií]fic|info|claro)|espec[ií]fic|expl[ií]ca|exactamente|paso a paso|y (el|la|los|las) (otro|otra|otros|otras|dem[aá]s|siguiente)|cada (uno|una|final)|c[oó]mo (lo|la|los|las) (logro|hago|consigo|saco)|c[oó]mo (lograr|conseguir|sacar|hacer) (eso|cada|el|la)|y (como|c[oó]mo|d[oó]nde)\b|final\b/i;
 const PIDE_INFO = /c[oó]mo (se |le |consigo|saco|paso|hago|desbloque|mato|llego)|d[oó]nde (est[aá]|consigo|se |queda|encuentro)|gu[ií]a|final(es)? |jefe|boss|truco|tip|secreto|logro|trofeo|platin|desbloque|cu[aá]nto dura|cu[aá]ntas? (horas|misiones|niveles|cap[ií]tulos)|build|mejor arma|dificultad|investiga/i;
 
 function instrucciones(config, d, plataforma) {
@@ -45,7 +47,8 @@ function instrucciones(config, d, plataforma) {
     '- No repitas frases de tus mensajes anteriores.',
     '',
     'INFORMACION DEL JUEGO:',
-    '- Cuando recibas RESULTADOS DE BUSQUEDA, usa esos datos para contestar y cuentalo como platica: "lei en una guia que...", "vi un video donde...", "mucha gente comenta que...". NUNCA pongas links, nombres de paginas web, numeros de referencia ni la palabra "fuente".',
+    '- Cuando recibas RESULTADOS DE BUSQUEDA: los datos concretos (nombres, pasos, requisitos, lugares) SOLO pueden salir de esos resultados. Si lo que preguntan no viene en los resultados, dilo con naturalidad ("eso no lo vi bien en la guia", "eso no me quedo claro") en vez de completarlo de tu cabeza.',
+    '- Cuentalo como platica: "lei en una guia que...", "vi un video donde...", "mucha gente comenta que...". NUNCA pongas links, nombres de paginas web, numeros de referencia ni la palabra "fuente".',
     '- Usa solo datos que correspondan al juego exacto que preguntan; no los mezcles con otros juegos de la misma saga.',
     '- Si NO recibiste resultados de busqueda: NO digas que leiste, viste o checaste guias, videos o foros. Contesta con lo que sepas con certeza, o dilo con naturalidad ("si no me falla la memoria...", "no estoy seguro, ahorita no me acuerdo"). Si el juego es muy nuevo y no tienes el dato, admitelo; NUNCA inventes datos concretos (finales, pasos, ubicaciones).',
     '- Pantalla: a veces recibes imagenes de mi directo de los ultimos segundos (la ultima es la mas reciente). Si preguntan o comentan algo de lo que pasa en el juego, miralas y contesta segun lo que se ve, como si lo estuvieras jugando. No narres la pantalla si nadie pregunta.',
@@ -113,6 +116,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
   };
   const pausado = () => Boolean(ajustes().botPausado?.[plataforma]);
   let saludadosHoy = new Set();
+  let ultimaInfo = null; // última búsqueda del juego, para preguntas de seguimiento
   const historial = [];
   let pendientes = [];
   let ultimoMensajeChat = Date.now();
@@ -165,11 +169,22 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
     pendientes = [];
     // Si alguien pregunta algo del juego (guías, finales, jefes…), buscamos en internet primero.
     let busqueda = '';
-    const pregunta = tanda.find((t) => PIDE_INFO.test(t.plano));
-    if (pregunta && leerConfig().buscarEnInternet !== false && buscadorConfigurado()) {
-      const d = datos.actual();
-      const r = await buscarEnInternet(armarConsulta(pregunta.plano.replace(/^@\S+:\s*/, ''), d.juego));
-      if (r?.resultados.length) busqueda = `RESULTADOS DE BUSQUEDA en internet sobre "${d.juego}" (usalos para los datos concretos):\n${resumenParaIA(r)}\n\n`;
+    const d = datos.actual();
+    const sinNombre = (t) => t.plano.replace(/^@\S+:\s*/, '');
+    const reciente = ultimaInfo && Date.now() - ultimaInfo.hora < 10 * 60_000 && ultimaInfo.juego === d.juego ? ultimaInfo : null;
+    let pregunta = tanda.find((t) => PIDE_INFO.test(t.plano));
+    const seguimiento = !pregunta && reciente ? tanda.find((t) => SEGUIMIENTO.test(sinNombre(t))) : null;
+    if ((pregunta || seguimiento) && leerConfig().buscarEnInternet !== false && buscadorConfigurado()) {
+      // En un seguimiento buscamos el tema anterior + lo nuevo que piden, y juntamos con lo que ya teníamos.
+      const consulta = pregunta ? sinNombre(pregunta) : `${reciente.pregunta} ${sinNombre(seguimiento)}`;
+      const r = await buscarCompleto(armarConsulta(consulta, d.juego));
+      const resultados = [...(r?.resultados ?? []), ...(seguimiento ? reciente.datos.resultados : [])].slice(0, 10);
+      if (resultados.length) {
+        const datosBusqueda = { respuesta: r?.respuesta || reciente?.datos.respuesta || '', resultados };
+        ultimaInfo = { hora: Date.now(), juego: d.juego, pregunta: consulta, datos: datosBusqueda };
+        busqueda = `RESULTADOS DE BUSQUEDA en internet sobre "${d.juego}" (los datos concretos SOLO pueden salir de aqui):\n${resumenParaIA(datosBusqueda)}\n\n`;
+      }
+      pregunta = pregunta || seguimiento;
     }
     const texto =
       `Chat reciente (contexto):\n${historial.filter((l) => !tanda.some((t) => t.plano === l)).join('\n') || '(vacio)'}\n\n` +

@@ -124,13 +124,22 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
     // Llamar con cada mensaje que llega al chat de esta plataforma.
     async recibir({ usuarioId, nombre, texto, esMio }) {
       ultimoMensajeChat = Date.now();
+      let prueba = false;
       if (esMio) {
         if (enviados.has(texto)) { enviados.delete(texto); return; } // eco del bot
-        recordar(`YO: ${texto}`);
-        registrar({ plataforma, nombre, texto, tipo: 'yo' });
-        return;
+        // Modo prueba: si empiezas con "bot", te contesta como a cualquier persona del chat.
+        const m = texto.match(/^\s*bot\b[\s,:.-]*(.*)$/is);
+        if (!m || !m[1].trim() || leerConfig().modoPrueba === false) {
+          recordar(`YO: ${texto}`);
+          registrar({ plataforma, nombre, texto, tipo: 'yo' });
+          return;
+        }
+        prueba = true;
+        texto = m[1].trim();
+        usuarioId = 'prueba-' + usuarioId;
+        log(`🧪 Prueba (${NOMBRES[plataforma]}): ${texto}`);
       }
-      registrar({ plataforma, nombre, texto, tipo: 'gente' });
+      registrar({ plataforma, nombre: prueba ? `${nombre} (prueba)` : nombre, texto, tipo: 'gente' });
       const config = leerConfig();
       const palabra = texto.trim().split(/\s+/)[0].toLowerCase();
       const comando = config.comandos?.[palabra];
@@ -151,6 +160,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
       }
       vistosHoy.add(id);
 
+      if (prueba) marca += ' [es el streamer haciendo una prueba: contestale como a cualquier espectador]';
       recordar(`@${nombre}: ${texto}`);
       pendientes.push({ linea: `@${nombre}${marca}: ${texto}`, plano: `@${nombre}: ${texto}` });
     },

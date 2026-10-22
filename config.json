@@ -40,5 +40,6 @@
     "modelo": "gemma3:4b",
     "veImagenes": true,
     "segundosMaximos": 60
-  }
+  },
+  "modoPrueba": true
 }

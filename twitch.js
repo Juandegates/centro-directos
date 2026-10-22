@@ -104,7 +104,7 @@ export async function horarioPublicado(canalId) {
 export async function directosPasados(canalId) {
   try {
     const r = await api(`videos?user_id=${canalId}&type=archive&first=30`);
-    return (r.data ?? []).map((v) => v.created_at);
+    return (r.data ?? []).map((v) => ({ fecha: v.created_at, titulo: v.title, duracion: v.duration }));
   } catch {
     return [];
   }

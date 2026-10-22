@@ -10,7 +10,7 @@ const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', '
 const ORDEN_DIAS = [1, 2, 3, 4, 5, 6, 0];
 
 function cargar() {
-  const base = { inicios: [], juegos: {} };
+  const base = { inicios: [], juegos: {}, directos: [] };
   if (!existsSync(ARCHIVO)) return base;
   try { return { ...base, ...JSON.parse(readFileSync(ARCHIVO, 'utf8')) }; } catch { return base; }
 }
@@ -39,6 +39,7 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
   const guardar = () => writeFileSync(ARCHIVO, JSON.stringify(memoria, null, 2));
   const estado = { juego: '', juegoId: '', titulo: '', enVivo: false, inicio: null, espectadores: 0, horario: 'todavía sin horario fijo', sugerencia: null };
   let fuentesHorario = [];
+  let vodsTwitch = [];
   let ultimaNota = 0;
   let ultimaRevision = 0;
   let sospechas = 0;
@@ -70,15 +71,23 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
     estado.enVivo = vivo;
     if (vivo) {
       memoria.inicios = [...memoria.inicios, new Date().toISOString()].slice(-60);
+      memoria.directos = [...memoria.directos, { inicio: new Date().toISOString(), juego: estado.juego, titulo: estado.titulo }].slice(-30);
       guardar();
       actualizarHorario();
+    } else {
+      const ultimo = memoria.directos.at(-1);
+      if (ultimo && !ultimo.minutos) {
+        Object.assign(ultimo, { juego: estado.juego || ultimo.juego, titulo: estado.titulo || ultimo.titulo, minutos: Math.round((Date.now() - new Date(ultimo.inicio)) / 60_000) });
+        guardar();
+      }
     }
     alCambioVivo?.(vivo);
   }
 
   async function refrescarFuentesHorario() {
     const [publicado, pasados] = await Promise.all([twitch.horarioPublicado(canal.id), twitch.directosPasados(canal.id)]);
-    fuentesHorario = publicado.length ? publicado : pasados;
+    vodsTwitch = pasados;
+    fuentesHorario = publicado.length ? publicado : pasados.map((v) => v.fecha);
     actualizarHorario();
   }
   const actualizarHorario = () => { estado.horario = describirHorario([...fuentesHorario, ...memoria.inicios]); };
@@ -131,6 +140,16 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
     } catch { /* sin IA disponible: se reintenta luego */ }
   }
 
+  // Lista corta de tus directos anteriores para que el bot pueda platicar de ellos.
+  function resumenDirectos() {
+    const fecha = (f) => new Date(f).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' });
+    const propios = memoria.directos.filter((x) => x.minutos || !estado.enVivo).slice(-6).reverse()
+      .map((x) => `${fecha(x.inicio)}: ${x.juego || 'juego desconocido'}${x.titulo ? ` ("${x.titulo}")` : ''}${x.minutos ? `, ${x.minutos} min` : ''}`);
+    if (propios.length >= 3) return propios.join('; ');
+    const deTwitch = vodsTwitch.slice(0, 6 - propios.length).map((v) => `${fecha(v.fecha)}: "${v.titulo}"${v.duracion ? `, duró ${v.duracion}` : ''}`);
+    return [...propios, ...deTwitch].join('; ');
+  }
+
   refrescar();
   refrescarFuentesHorario().catch(() => {});
   setInterval(refrescar, 60_000);
@@ -152,6 +171,7 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
       espectadores: estado.espectadores,
       sugerencia: estado.sugerencia,
       notasJuego: memoria.juegos[estado.juego]?.notas ?? '',
+      directosPasados: resumenDirectos(),
     }),
   };
 }

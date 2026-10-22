@@ -3,7 +3,7 @@ import { marcar } from './estado.js';
 
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const PREFERIDOS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
-const ESPERA_MAXIMA_MS = 25_000;
+const ESPERA_MAXIMA_MS = 12_000;
 
 let avisos = () => {};
 export const alAvisoIA = (fn) => { avisos = fn; };
@@ -30,13 +30,21 @@ async function modelosDisponibles(clave) {
   return catalogo.modelos;
 }
 
-async function gemini({ sistema, texto, imagenes }) {
+// Modelos que fallaron hace poco se brincan un rato, y el último que funcionó va primero:
+// así el bot contesta en segundos aunque Google tenga algún modelo saturado.
+const castigados = new Map(); // modelo → hasta cuándo no usarlo
+let ultimoBueno = null;
+const castigar = (modelo, minutos) => castigados.set(modelo, Date.now() + minutos * 60_000);
+
+async function gemini({ sistema, texto, imagenes, buscar }) {
   const clave = process.env.GEMINI_API_KEY;
   if (!clave) throw new Error('Falta GEMINI_API_KEY en claves.txt');
   const disponibles = await modelosDisponibles(clave);
-  const modelos = [...new Set([process.env.GEMINI_MODELO, ...PREFERIDOS, ...disponibles].filter(Boolean))].slice(0, 6);
+  const todos = [...new Set([ultimoBueno, process.env.GEMINI_MODELO, ...PREFERIDOS, ...disponibles].filter(Boolean))].slice(0, 7);
+  let modelos = todos.filter((m) => !(castigados.get(m) > Date.now()));
+  if (!modelos.length) modelos = todos; // si todos están castigados, igual lo intentamos
 
-  const cuerpo = JSON.stringify({
+  const armar = (conBusqueda) => JSON.stringify({
     systemInstruction: { parts: [{ text: sistema }] },
     contents: [{
       role: 'user',
@@ -45,44 +53,53 @@ async function gemini({ sistema, texto, imagenes }) {
         { text: texto },
       ],
     }],
-    generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
+    ...(conBusqueda ? { tools: [{ google_search: {} }] } : {}),
+    generationConfig: { temperature: 0.9, maxOutputTokens: 2048 },
   });
 
   let todosEnLimite = true;
   let ultimoError = '';
 
   for (const modelo of modelos) {
-    let res;
-    try {
-      res = await fetch(`${URL_BASE}/${modelo}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
-        body: cuerpo,
-        signal: AbortSignal.timeout(ESPERA_MAXIMA_MS),
-      });
-    } catch (e) {
-      todosEnLimite = false;
-      ultimoError = e.name === 'TimeoutError' ? `${modelo} tardó demasiado` : `${modelo}: ${e.cause?.code ?? e.message}`;
-      avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
-      continue;
-    }
+    let conBusqueda = buscar;
+    for (let intento = 0; intento < 2; intento++) {
+      let res;
+      try {
+        res = await fetch(`${URL_BASE}/${modelo}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
+          body: armar(conBusqueda),
+          signal: AbortSignal.timeout(conBusqueda ? 20_000 : ESPERA_MAXIMA_MS),
+        });
+      } catch (e) {
+        todosEnLimite = false;
+        ultimoError = e.name === 'TimeoutError' ? `${modelo} tardó demasiado` : `${modelo}: ${e.cause?.code ?? e.message}`;
+        castigar(modelo, 10);
+        avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
+        break;
+      }
 
-    if (res.ok) {
-      const datos = await res.json();
-      const partes = datos.candidates?.[0]?.content?.parts ?? [];
-      marcar('ia', 'ok', `Funcionando (${modelo})`);
-      return partes.filter((p) => !p.thought).map((p) => p.text ?? '').join('').replace(/\s+/g, ' ').trim();
-    }
+      if (res.ok) {
+        const datos = await res.json();
+        const partes = datos.candidates?.[0]?.content?.parts ?? [];
+        ultimoBueno = modelo;
+        marcar('ia', 'ok', `Funcionando (${modelo}${conBusqueda ? ' + búsqueda' : ''})`);
+        return partes.filter((p) => !p.thought).map((p) => p.text ?? '').join('').replace(/\s+/g, ' ').trim();
+      }
 
-    const detalle = (await res.text()).slice(0, 300);
-    if (res.status !== 429) todosEnLimite = false;
-    if ([429, 500, 503, 504, 404].includes(res.status)) {
-      ultimoError = `${modelo} respondió ${res.status}`;
-      avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
-      continue;
+      const detalle = (await res.text()).slice(0, 300);
+      // Si la búsqueda en Google no está disponible (o se acabó su cuota), repetimos sin búsqueda.
+      if (conBusqueda && [400, 429].includes(res.status)) { conBusqueda = false; continue; }
+      if (res.status !== 429) todosEnLimite = false;
+      if ([429, 500, 503, 504, 404].includes(res.status)) {
+        ultimoError = `${modelo} respondió ${res.status}`;
+        castigar(modelo, res.status === 404 ? 24 * 60 : 10);
+        avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
+        break;
+      }
+      marcar('ia', 'error', `Gemini respondió ${res.status}`, detalle);
+      throw new Error(`La IA respondió ${res.status}: ${detalle}`);
     }
-    marcar('ia', 'error', `Gemini respondió ${res.status}`, detalle);
-    throw new Error(`La IA respondió ${res.status}: ${detalle}`);
   }
 
   const e = new Error(todosEnLimite ? 'Gemini llegó a su límite gratuito' : `Ningún modelo de Gemini respondió (${ultimoError})`);
@@ -112,11 +129,11 @@ async function local({ sistema, texto, imagenes }) {
   return (d.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-export async function preguntarIA({ sistema, texto, imagenes = [] }) {
+export async function preguntarIA({ sistema, texto, imagenes = [], buscar = false }) {
   let errorGemini = null;
   if (Date.now() >= geminiPausadoHasta) {
     try {
-      return await gemini({ sistema, texto, imagenes });
+      return await gemini({ sistema, texto, imagenes, buscar });
     } catch (e) {
       errorGemini = e;
       if (e.limite) {

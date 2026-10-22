@@ -41,5 +41,6 @@
     "veImagenes": true,
     "segundosMaximos": 60
   },
-  "modoPrueba": true
+  "modoPrueba": true,
+  "buscarEnInternet": true
 }

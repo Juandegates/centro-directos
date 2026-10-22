@@ -32,6 +32,10 @@ export async function probarTodo({ leerConfig, canalId }) {
     const r = await fetch('https://www.google.com/generate_204', { signal: AbortSignal.timeout(8000) });
     if (r.status !== 204) throw new Error(`Respuesta rara: ${r.status}`);
   }));
+  resultados.push(await prueba('Aviso de prueba al celular', async () => {
+    if (!(await avisar('🔧 Prueba del Centro', 'Si ves esto, los avisos funcionan.', { clave: 'prueba' + Date.now(), etiquetas: ['wrench'] }))) throw new Error('ntfy no recibió el aviso (revisa el internet de la PC)');
+    return 'Enviado (revisa tu celular)';
+  }));
   resultados.push(await prueba('Espacio en disco', async () => {
     const s = statfsSync(fileURLToPath(new URL('./', import.meta.url)));
     const libres = (s.bavail * s.bsize) / 2 ** 30;
@@ -69,9 +73,5 @@ export async function probarTodo({ leerConfig, canalId }) {
   }
   resultados.push(await prueba('Streamlink', async () => programa(rutaStreamlink(config), ['--version'])));
   resultados.push(await prueba('FFmpeg', async () => programa(rutaFfmpeg(config), ['-version']).slice(0, 60)));
-  resultados.push(await prueba('Aviso de prueba al celular', async () => {
-    if (!(await avisar('🔧 Prueba del Centro', 'Si ves esto, los avisos funcionan.', { clave: 'prueba' + Date.now(), etiquetas: ['wrench'] }))) throw new Error('ntfy no recibió el aviso (revisa el internet de la PC)');
-    return 'Enviado (revisa tu celular)';
-  }));
   return resultados;
 }

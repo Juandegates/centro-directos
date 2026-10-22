@@ -1,6 +1,7 @@
 // Centro de Directos · Fase 1: bot de IA que maneja tu chat de Twitch como si fueras tú.
 import { createServer } from 'node:http';
-import { crearBot } from './bot.js';
+import { crearBot, leerConfig } from './bot.js';
+import { crearPantalla } from './pantalla.js';
 import * as twitch from './twitch.js';
 
 const hora = () => new Date().toLocaleTimeString('es-MX', { hour12: false });
@@ -22,8 +23,16 @@ async function iniciarBot() {
   const canal = await twitch.idDeUsuario(process.env.TWITCH_CANAL);
   log(`Sesión de Twitch: ${yo.display_name} · Canal: ${canal.display_name}`);
 
+  const pantalla = crearPantalla({
+    canal: canal.login,
+    leerConfig,
+    estaEnVivo: () => twitch.estaEnVivo(canal.id),
+    log,
+  });
+
   const bot = crearBot({
     log,
+    verPantalla: () => (leerConfig().pantalla?.activa === false ? [] : pantalla.recientes(3)),
     enviar: (texto) => twitch.enviarMensaje({ canalId: canal.id, emisorId: yo.id, texto }),
     estaEnVivo: () => twitch.estaEnVivo(canal.id),
   });

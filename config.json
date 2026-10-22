@@ -3,7 +3,8 @@
   "datosDelCanal": {
     "juegoDeHoy": "[pon aqui el juego]",
     "horario": "[pon aqui tus dias y hora]",
-    "otros": "[cualquier cosa que deba saber: tu equipo, metas del canal, etc.]"
+    "otros": "[cualquier cosa que deba saber: tu equipo, metas del canal, etc.]",
+    "notasDelJuego": "[opcional: en qué parte vas, tu personaje, build, metas de hoy]"
   },
   "prefijo": "",
   "saludarNuevos": true,
@@ -17,5 +18,13 @@
     "!horario": "Los directos son [pon aqui tus dias y hora]. ¡Sigue el canal para que te llegue el aviso!",
     "!juego": "Hoy andamos jugando [pon aqui el juego].",
     "!redes": "Sigue el canal aqui en Twitch para no perderte ningun directo."
+  },
+  "pantalla": {
+    "activa": true,
+    "segundosEntreImagenes": 2
+  },
+  "herramientas": {
+    "streamlink": "streamlink",
+    "ffmpeg": ""
   }
 }

@@ -2,7 +2,7 @@
 
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-export async function preguntarIA({ sistema, texto }) {
+export async function preguntarIA({ sistema, texto, imagenes = [] }) {
   const clave = process.env.GEMINI_API_KEY;
   const modelo = process.env.GEMINI_MODELO || 'gemini-flash-latest';
   if (!clave) throw new Error('Falta GEMINI_API_KEY en claves.txt');
@@ -12,7 +12,13 @@ export async function preguntarIA({ sistema, texto }) {
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: sistema }] },
-      contents: [{ role: 'user', parts: [{ text: texto }] }],
+      contents: [{
+        role: 'user',
+        parts: [
+          ...imagenes.map((i) => ({ inline_data: { mime_type: i.mime, data: i.base64 } })),
+          { text: texto },
+        ],
+      }],
       generationConfig: { temperature: 0.9, maxOutputTokens: 1024 },
     }),
   });

@@ -13,13 +13,15 @@ function instrucciones(config) {
     'Eres el streamer escribiendo en su propio chat de Twitch mientras juega en vivo en la PS5. Escribes SIEMPRE en primera persona, como si fueras el, nunca digas que eres un bot o una IA.',
     `Quien soy y como hablo: ${config.comoSoy}`,
     `Datos del canal: juego de hoy: ${d.juegoDeHoy}. Horario: ${d.horario}. Otros: ${d.otros}.`,
+    `Notas del juego (lo que llevo, mi personaje, etc.): ${d.notasDelJuego ?? '(ninguna)'}`,
     'Reglas:',
     '- Mensajes cortos de chat: 1 a 3 frases, maximo 350 caracteres, en espanol mexicano natural.',
     '- Menciona con @usuario a quien le contestas. Puedes contestar a varios en un mismo mensaje.',
     '- Haz preguntas al chat para sacar platica (sobre el juego, sus gustos, de donde son).',
     '- Saluda con ganas a quien escribe por primera vez en el canal; a quien vuelve, salúdalo como a un conocido.',
     '- No inventes datos: si no sabes algo (o un dato dice [pon aqui...]), sale por la tangente con humor sin dar el dato.',
-    '- No describas en detalle lo que pasa en pantalla: no la puedes ver. Habla en general del juego.',
+    '- Pantalla: a veces recibes imagenes de mi directo de los ultimos segundos (la ultima es la mas reciente). Si alguien pregunta o comenta algo de lo que pasa en el juego, miralas y contesta segun lo que se ve, como si lo estuvieras jugando. Si no recibes imagenes o no se alcanza a ver, contesta de forma general sin inventar detalles.',
+    '- No narres la pantalla si nadie pregunta; usala solo cuando venga al caso.',
     '- Nunca prometas regalos, sorteos, dinero ni encuentros. Nada de temas polemicos, politica ni groserias fuertes.',
     '- Nunca menciones ni invites a otras plataformas de streaming (YouTube, TikTok, Kick u otras).',
     '- Si alguien es grosero o hace spam, ignoralo.',
@@ -28,7 +30,7 @@ function instrucciones(config) {
   ].join('\n');
 }
 
-export function crearBot({ enviar, estaEnVivo, log }) {
+export function crearBot({ enviar, estaEnVivo, log, verPantalla = () => [] }) {
   const conocidos = new Set(existsSync(ARCHIVO_CONOCIDOS) ? JSON.parse(readFileSync(ARCHIVO_CONOCIDOS, 'utf8')) : []);
   const vistosHoy = new Set();
   const historial = []; // últimas líneas del chat, incluidas las tuyas
@@ -49,7 +51,9 @@ export function crearBot({ enviar, estaEnVivo, log }) {
   async function hablar(texto, sistema) {
     if (Date.now() < pausadoHasta) return;
     try {
-      let r = await preguntarIA({ sistema, texto });
+      const imagenes = verPantalla();
+      if (imagenes.length) texto += `\n\n(Te adjunto ${imagenes.length} imagenes de mi directo de los ultimos segundos.)`;
+      let r = await preguntarIA({ sistema, texto, imagenes });
       if (!r || r.includes(NADA)) return;
       r = r.slice(0, 450);
       const config = leerConfig();
@@ -92,7 +96,7 @@ export function crearBot({ enviar, estaEnVivo, log }) {
     log('El chat está callado; mando algo para sacar plática…');
     await hablar(
       `Chat reciente:\n${historial.join('\n') || '(vacio)'}\n\nEl chat lleva un rato callado. ` +
-        'Escribe UN mensaje para animar la platica: una pregunta al chat, un comentario del juego o una dinamica sencilla (por ejemplo, que voten algo). No pidas follows en cada mensaje.',
+        'Escribe UN mensaje para animar la platica: una pregunta al chat, un comentario de lo que esta pasando en el juego (si tienes imagenes) o una dinamica sencilla (por ejemplo, que voten algo). No pidas follows en cada mensaje.',
       instrucciones(config),
     );
     ocupado = false;

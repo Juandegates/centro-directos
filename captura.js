@@ -51,7 +51,9 @@ export function crearCaptura({ canal, leerConfig }) {
         if (!activa) return;
         fallas++;
         const espera = Math.min(60, 5 * fallas);
-        marcar('captura', 'aviso', `Se cortó la vista de tu directo; reintento en ${espera} s`, errores || `código ${codigo}`);
+        // Las primeras 2 veces reintentamos callados: casi siempre es que el directo está terminando
+        // (Twitch tarda unos segundos en avisar que acabó) o un corte de un instante.
+        if (fallas > 2) marcar('captura', 'aviso', `Se cortó la vista de tu directo; reintento en ${espera} s`, errores || `código ${codigo}`);
         reintento = setTimeout(() => activa && arrancar(), espera * 1000);
       },
     });

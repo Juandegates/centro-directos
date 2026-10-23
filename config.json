@@ -6,7 +6,7 @@
   "segundosParaLeerChat": 6,
   "animarChat": {
     "activo": true,
-    "minutosSinMensajes": 5,
+    "minutosSinMensajes": 20,
     "soloEnVivo": true
   },
   "comandos": {
@@ -16,7 +16,8 @@
   },
   "pantalla": {
     "activa": true,
-    "segundosEntreImagenes": 2
+    "segundosEntreImagenes": 2,
+    "notasCadaMinutos": 20
   },
   "herramientas": {
     "streamlink": "streamlink",
@@ -29,7 +30,8 @@
     "segundos": 40,
     "minutosEntreClips": 3,
     "minimoMensajes": 5,
-    "minimoReacciones": 4
+    "minimoReacciones": 4,
+    "zoomVertical": 0.7
   },
   "youtube": {
     "segundosEntreLecturas": 10
@@ -42,5 +44,6 @@
     "segundosMaximos": 60
   },
   "modoPrueba": true,
-  "buscarEnInternet": true
+  "buscarEnInternet": true,
+  "versionConfig": 2
 }

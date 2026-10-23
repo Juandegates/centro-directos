@@ -2,6 +2,7 @@
 import { hostname } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { crearBot, leerConfig } from './bot.js';
 import { crearCaptura } from './captura.js';
 import { crearDatos } from './datos.js';
@@ -23,6 +24,17 @@ import * as youtube from './youtube.js';
 console.log(`\n=== Centro de Directos · v${VERSION} ===\n`);
 alAvisoIA((t) => log(t));
 configurarIA(leerConfig);
+
+// Ajustes que cambiaron de valor recomendado entre versiones (solo si seguías con el valor viejo).
+try {
+  const ruta = new URL('./config.json', import.meta.url);
+  const c = leerConfig();
+  if ((c.versionConfig ?? 1) < 2) {
+    if (c.animarChat?.minutosSinMensajes === 5) c.animarChat.minutosSinMensajes = 20;
+    c.versionConfig = 2;
+    writeFileSync(ruta, JSON.stringify(c, null, 2) + '\n');
+  }
+} catch (e) { log('No pude actualizar config.json: ' + e.message, { nivel: 'aviso' }); }
 
 for (const k of ['GEMINI_API_KEY', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'TWITCH_CANAL']) {
   if (!process.env[k] || process.env[k].startsWith('pega_aqui') || process.env[k] === 'tu_usuario_de_twitch') {

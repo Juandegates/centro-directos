@@ -92,9 +92,10 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
   }
   const actualizarHorario = () => { estado.horario = describirHorario([...fuentesHorario, ...memoria.inicios]); };
 
-  // Cada 5 min en vivo: mira la pantalla y actualiza las notas de tu partida.
+  // Cada 20 min en vivo (config: pantalla.notasCadaMinutos): mira la pantalla y actualiza las notas de tu partida.
   async function aprenderDelJuego() {
-    if (!estado.enVivo || !estado.juego || Date.now() - ultimaNota < 5 * 60_000) return;
+    const cada = leerConfig().pantalla?.notasCadaMinutos ?? 20;
+    if (!estado.enVivo || !estado.juego || Date.now() - ultimaNota < cada * 60_000) return;
     const imagenes = verPantalla();
     if (!imagenes.length) return;
     ultimaNota = Date.now();
@@ -103,7 +104,7 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
       const notas = await preguntarIA({
         sistema: 'Tomas notas breves de una partida de videojuego a partir de capturas del directo.',
         imagenes,
-        texto: `Juego: ${estado.juego}.\nNotas actuales:\n${previas}\n\nCon estas imagenes, actualiza las notas: personaje, zona o mapa, modo, progreso, equipo o armas y datos utiles para platicar con el chat. Maximo 6 lineas. Conserva lo que siga siendo cierto. Solo hechos que se vean; no inventes. Responde solo con las notas.`,
+        texto: `Juego: ${estado.juego}.\nNotas actuales:\n${previas}\n\nCon estas imagenes, actualiza las notas: personaje, zona o mapa, modo, progreso, equipo o armas y datos utiles para platicar con el chat. Maximo 6 lineas. Conserva lo que siga siendo cierto. Solo hechos que se vean; no inventes. Los numeros chiquitos (nivel, vida, dinero) se leen mal a veces: anotalos solo si se ven perfectamente claros, si no pon algo aproximado ("nivel 40 y tantos"). Responde solo con las notas.`,
       });
       if (notas) {
         memoria.juegos[estado.juego] = { notas: notas.slice(0, 800), actualizado: new Date().toISOString() };

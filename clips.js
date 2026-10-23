@@ -43,7 +43,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     ultimoClip = Date.now();
     const id = nuevoId();
     const carpeta = join(CARPETA_CLIPS, id);
-    const fotos = captura.recientes(3);
+    const fotos = captura.recientes(5);
     const chat = mensajes.filter((m) => m.hora > Date.now() - 60_000).map((m) => m.linea).slice(-15);
     log(`🎬 Momento detectado (${motivo}); armando clip…`, { parte: 'clips' });
 
@@ -67,9 +67,11 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
       const portada = join(carpeta, 'portada.jpg');
 
       await correrFfmpeg(config, ['-f', 'concat', '-safe', '0', '-i', listaArchivos, '-c', 'copy', '-movflags', '+faststart', horizontal]);
+      // Vertical: el juego al centro con zoom (recorta un poco los lados para que se vea más grande en el celular).
+      const zoom = Math.min(1, Math.max(0.4, Number(c.zoomVertical ?? 0.7)));
       await correrFfmpeg(config, ['-i', horizontal, '-filter_complex',
         '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5[fondo];' +
-        '[0:v]scale=1080:-2[frente];[fondo][frente]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]',
+        `[0:v]crop=trunc(iw*${zoom}/2)*2:ih,scale=1080:-2[frente];[fondo][frente]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]`,
         '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', vertical]);
       await correrFfmpeg(config, ['-ss', '3', '-i', horizontal, '-frames:v', '1', '-vf', 'scale=480:-2', portada]);
@@ -109,7 +111,11 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
         imagenes: fotos,
         texto:
           `Juego: ${d.juego}. Motivo del clip: ${motivo}.\nChat en ese momento:\n${chat.join('\n') || '(sin mensajes)'}\n\n` +
-          'Las imagenes son del momento del clip. Devuelve SOLO un JSON valido con estas llaves:\n' +
+          `Notas de la partida: ${d.notasJuego || '(ninguna)'}\n\n` +
+          'Las imagenes son del momento del clip (la ultima es la mas reciente). Mira bien que esta pasando: jefe, enemigos, zona, accion, si gano o perdio. ' +
+          'El titulo y los textos deben describir ESO en concreto (ej. "Me enfrento al jefe de la catedral", "Casi muero con estos picos"). ' +
+          'Prohibido usar frases genericas como "paso perfecto", "momentazo", "epico" o "no te lo pierdas" si no dicen que paso. No inventes lo que no se ve.\n' +
+          'Devuelve SOLO un JSON valido con estas llaves:\n' +
           '"titulo": titulo corto con gancho (max 60 caracteres),\n' +
           '"tiktok": descripcion para TikTok/Shorts con 4 a 6 hashtags relevantes (max 200 caracteres),\n' +
           '"x": texto para X (max 200 caracteres, sin hashtags de mas).',

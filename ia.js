@@ -3,8 +3,9 @@ import { marcar } from './estado.js';
 
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const PREFERIDOS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
-const ESPERA_MAXIMA_MS = 9_000;  // por modelo
-const ESPERA_TOTAL_MS = 16_000;  // entre todos los modelos
+// Con imágenes de la pantalla la IA tarda más, así que le damos más tiempo.
+const ESPERA_MAXIMA_MS = { texto: 9_000, imagenes: 15_000 };  // por modelo
+const ESPERA_TOTAL_MS = { texto: 16_000, imagenes: 30_000 };  // entre todos los modelos
 
 let avisos = () => {};
 export const alAvisoIA = (fn) => { avisos = fn; };
@@ -65,7 +66,8 @@ async function gemini({ sistema, texto, imagenes, buscar }) {
   let ultimoError = '';
   const fases = buscar && Date.now() > busquedaPausadaHasta ? [true, false] : [false];
 
-  const limite = Date.now() + ESPERA_TOTAL_MS; // nunca esperar más de esto en total
+  const tipo = imagenes.length ? 'imagenes' : 'texto';
+  const limite = Date.now() + ESPERA_TOTAL_MS[tipo]; // nunca esperar más de esto en total
   for (const conBusqueda of fases) {
     let erroresDeBusqueda = 0;
     for (const modelo of modelos) {
@@ -78,12 +80,12 @@ async function gemini({ sistema, texto, imagenes, buscar }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
           body: armar(conBusqueda),
-          signal: AbortSignal.timeout(Math.min(conBusqueda ? 25_000 : ESPERA_MAXIMA_MS, queda)),
+          signal: AbortSignal.timeout(Math.min(conBusqueda ? 25_000 : ESPERA_MAXIMA_MS[tipo], queda)),
         });
       } catch (e) {
         todosEnLimite = false;
         ultimoError = e.name === 'TimeoutError' ? `${modelo} tardó demasiado` : `${modelo}: ${e.cause?.code ?? e.message}`;
-        if (!conBusqueda) castigar(modelo, 10);
+        if (!conBusqueda) castigar(modelo, 3); // tardarse suele ser pasajero
         avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
         continue;
       }

@@ -31,6 +31,7 @@ export async function avisar(titulo, mensaje, { prioridad = 3, etiquetas = [], a
     marcar('avisos', 'ok', 'Funcionando');
     return true;
   } catch (e) {
+    recientes.delete(id); // que se pueda reintentar
     marcar('avisos', 'aviso', 'No pude mandar un aviso al celular', e.message);
     log(`(aviso no enviado) ${titulo}: ${mensaje}`);
     return false;

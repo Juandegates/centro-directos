@@ -158,3 +158,12 @@ export async function enviarChat(chatId, texto) {
     cuerpo: { snippet: { liveChatId: chatId, type: 'textMessageEvent', textMessageDetails: { messageText: texto.slice(0, 200) } } },
   });
 }
+
+// Al terminar: título, descripción (con capítulos) y etiquetas del directo guardado en YouTube.
+export async function actualizarVideo({ id, titulo, descripcion, etiquetas = [] }) {
+  await api('videos?part=snippet', {
+    metodo: 'PUT',
+    unidades: 50,
+    cuerpo: { id, snippet: { title: titulo.slice(0, 100), description: descripcion.slice(0, 4900), tags: etiquetas.slice(0, 15), categoryId: '20' } },
+  });
+}

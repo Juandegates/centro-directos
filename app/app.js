@@ -3,7 +3,7 @@
 
 const $ = (s) => document.querySelector(s);
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const TITULOS = { vivo: 'En vivo', chat: 'Chat', publicar: 'Publicar', diagnostico: 'Diagnóstico' };
+const TITULOS = { vivo: 'En vivo', chat: 'Chat', publicar: 'Publicar', crecer: 'Crecer', diagnostico: 'Diagnóstico' };
 const NOMBRE_PLAT = { twitch: 'Twitch', youtube: 'YouTube' };
 
 let estado = null;
@@ -86,6 +86,7 @@ function irA() {
   $('#titulo-seccion').textContent = TITULOS[nombre];
   if (nombre === 'publicar') cargarBandeja(extra);
   if (nombre === 'diagnostico') cargarBitacora();
+  if (nombre === 'crecer') cargarCrecer();
   if (vista === 'corregir' && estado?.directo?.sugerencia) {
     $('#campo-categoria').value = estado.directo.sugerencia;
     buscarCategorias();
@@ -275,7 +276,8 @@ async function cargarBandeja(enfocar) {
     const fecha = new Date(i.creado).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
     if (i.tipo === 'clip') {
       return `<article class="item ${hecho ? 'hecho' : ''}" id="item-${esc(i.id)}">
-        <div><strong>🎬 ${esc(i.titulo)}</strong><div class="tenue">${esc(fecha)} · ${esc(i.juego ?? '')} · ${esc(i.motivo ?? '')}</div></div>
+        <div><strong>🎬 ${esc(i.titulo)}</strong><div class="tenue">${esc(fecha)} · ${esc(i.juego ?? '')} · ${esc(i.motivo ?? '')}${i.puntos ? ` · ${i.puntos}/10` : ''}</div>
+          ${i.programado && !hecho ? `<div class="tenue">📅 Toca publicarlo: ${esc(fechaCorta(i.programado))}</div>` : ''}</div>
         <video controls playsinline preload="none" poster="/media/${esc(i.archivos.portada)}" src="/media/${esc(i.archivos.vertical)}"></video>
         <div class="tenue">Texto para TikTok / Shorts</div><div class="texto">${esc(i.textoTikTok)}</div>
         <div class="acciones">
@@ -305,6 +307,89 @@ async function cargarBandeja(enfocar) {
   cont.querySelectorAll('[data-marcar]').forEach((c) => { c.onchange = async () => { await api('/api/bandeja/' + c.dataset.marcar, { cuerpo: { publicado: { [c.dataset.plat]: c.checked } } }); cargarBandeja(null); }; });
   if (enfocar) document.getElementById('item-' + enfocar)?.scrollIntoView({ behavior: 'smooth' });
 }
+
+// ---------- crecer ----------
+let crecer = null;
+const fechaCorta = (iso) => new Date(iso).toLocaleString('es-MX', { weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+function pintarTituloSugerido() {
+  const b = $('#titulo-sugerido');
+  const s = crecer?.sugerencia;
+  b.hidden = !s?.titulo || s.titulo === estado?.directo?.titulo;
+  if (b.hidden) return;
+  b.innerHTML = `<span>✏️ <strong>Título sugerido para la búsqueda de Twitch:</strong></span><div class="texto">${esc(s.titulo)}</div>
+    ${s.etiquetas?.length ? `<div class="etiquetas">${s.etiquetas.map((t) => `<span>${esc(t)}</span>`).join('')}</div>` : ''}
+    <div class="fila botones"><button class="primario crece" data-accion="usar">Usar</button><button class="crece" data-accion="otro">Otro</button><button class="crece" data-accion="no">No</button></div>`;
+  b.querySelectorAll('button').forEach((btn) => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        const a = btn.dataset.accion;
+        await api('/api/crecer/titulo', { cuerpo: a === 'usar' ? { usar: true } : a === 'otro' ? { nuevo: true } : { usar: false } });
+        toast(a === 'usar' ? '✅ Título y etiquetas puestos' : a === 'otro' ? 'Va otro título…' : 'Listo, lo dejo como está');
+        await cargarCrecer();
+        refrescarEstado();
+      } catch (e) { toast(e.message); btn.disabled = false; }
+    };
+  });
+}
+
+async function cargarCrecer() {
+  try { crecer = await api('/api/crecer'); } catch { return; }
+  if (crecer.sinSesion) return;
+  pintarTituloSugerido();
+  const m = crecer.metas;
+  const perm = $('#crecer-permisos');
+  perm.hidden = !crecer.permisosFaltantes?.length;
+  perm.textContent = 'Para raidear desde aquí y agradecer a tus seguidores nuevos, en la PC abre http://localhost:3000/twitch y autoriza otra vez (una sola vez).';
+  const barra = (valor, meta) => {
+    const pct = valor == null ? 0 : Math.min(100, Math.round((valor / meta) * 100));
+    return `<div class="barra ${pct >= 100 ? 'lista' : ''}"><span style="width:${pct}%"></span></div>`;
+  };
+  $('#metas-afiliado').innerHTML = m.afiliado.map((x) => `<div class="meta"><div class="fila"><span>${esc(x.nombre)}</span><strong>${x.valor ?? '—'} / ${x.meta}${x.valor >= x.meta ? ' ✅' : ''}</strong></div>${barra(x.valor, x.meta)}</div>`).join('') +
+    `<p class="tenue">${esc(m.nota)}</p>`;
+  $('#meta-tiktok').innerHTML = `<div class="meta"><div class="fila"><span>Seguidores para hacer LIVE</span><strong>${m.tiktok.valor ?? '—'} / ${m.tiktok.meta}</strong></div>${barra(m.tiktok.valor, m.tiktok.meta)}</div>` +
+    `<p class="tenue">${m.tiktok.fecha ? `Anotado el ${esc(m.tiktok.fecha)}` : 'Anótalo cada domingo para ver tu avance.'}</p>`;
+  pintarRadar(crecer.radar);
+  const cal = $('#calendario');
+  cal.innerHTML = crecer.proximos.length
+    ? crecer.proximos.map((p) => `<div class="fila"><div class="crece"><strong>${esc(p.titulo)}</strong><div class="tenue">${esc(fechaCorta(p.programado))}${p.puntos ? ` · ${p.puntos}/10` : ''}${p.avisado ? ' · ya te avisé' : ''}</div></div><a class="boton" href="#clips/${esc(p.id)}">Ver</a></div>`).join('')
+    : '<div class="fila tenue">Sin clips programados todavía. Al terminar cada directo, el Centro reparte los clips: uno al día, los mejores primero.</div>';
+}
+
+function pintarRadar(r) {
+  if (!r?.total) return;
+  $('#radar-texto').innerHTML = `${r.lugar ? `Estás en el lugar <strong>${r.lugar}</strong> de ${r.total}${r.completo ? '' : '+'} canales en ${esc(r.juego)}.` : `Hay ${r.total}${r.completo ? '' : '+'} canales en ${esc(r.juego)} (todavía no apareces en la lista).`}` +
+    `<br>En español: ${r.lugarEs ? `lugar <strong>${r.lugarEs}</strong> de ${r.totalEs}` : `${r.totalEs} canales`}.` +
+    `<div class="tenue">${r.total < 40 ? 'Poca competencia: buena categoría para que te encuentren.' : r.total < 200 ? 'Competencia media.' : 'Mucha competencia: aquí te van a encontrar más por tus clips que por el directorio.'} · ${esc(fechaCorta(r.hora))}</div>`;
+}
+
+$('#revisar-radar').addEventListener('click', async () => {
+  try { const r = await api('/api/crecer/radar', { cuerpo: {} }); if (r.mensaje) toast(r.mensaje); else pintarRadar(r); } catch (e) { toast(e.message); }
+});
+$('#buscar-raid').addEventListener('click', async () => {
+  const cont = $('#raid-opciones');
+  cont.innerHTML = '<p class="tenue">Buscando…</p>';
+  try {
+    const r = await api('/api/crecer/raid');
+    if (!r.canal) { cont.innerHTML = `<p class="tenue">${esc(r.mensaje)}</p>`; return; }
+    const opciones = [r.canal, ...(r.otros ?? [])];
+    cont.innerHTML = opciones.map((c, i) => `<button type="button" data-i="${i}"><div class="crece"><strong>${esc(c.nombre)}</strong> · ${c.espectadores} viendo<div class="tenue">${esc(c.titulo)}</div></div>🚀</button>`).join('');
+    cont.querySelectorAll('button').forEach((b) => {
+      b.onclick = async () => {
+        const c = opciones[b.dataset.i];
+        try { const x = await api('/api/crecer/raid', { cuerpo: { id: c.id } }); cont.innerHTML = `<p>✅ ${esc(x.mensaje)}</p>`; } catch (e) { toast(e.message); }
+      };
+    });
+  } catch (e) { cont.innerHTML = ''; toast(e.message); }
+});
+$('#form-tiktok').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try { await api('/api/crecer/tiktok', { cuerpo: { total: $('#campo-tiktok').value } }); $('#campo-tiktok').value = ''; toast('Anotado'); cargarCrecer(); } catch (err) { toast(err.message); }
+});
+$('#copiar-semanal').addEventListener('click', async () => {
+  try { const t = await api('/api/crecer/reporte'); toast((await copiar(t)) ? 'Reporte copiado: pégalo en tu entrenador' : 'No pude copiar'); } catch (e) { toast(e.message); }
+});
 
 // ---------- diagnóstico ----------
 $('#probar-todo').addEventListener('click', async () => {
@@ -356,6 +441,8 @@ async function arrancar() {
   setInterval(refrescarEstado, 4000);
   setInterval(refrescarChat, 2000);
   setInterval(() => cargarBandeja(null), 20000);
+  cargarCrecer();
+  setInterval(cargarCrecer, 30000);
 }
 
 (async () => {

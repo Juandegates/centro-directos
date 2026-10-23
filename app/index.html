@@ -37,6 +37,7 @@
     <section id="vivo" class="vista">
       <div id="aviso-sesion" class="banner error" hidden></div>
       <div id="sugerencia" class="banner" hidden></div>
+      <div id="titulo-sugerido" class="banner" hidden></div>
 
       <article class="tarjeta">
         <div class="fila entre"><span class="tenue">Origen</span><span class="tenue">Espectadores</span></div>
@@ -101,6 +102,46 @@
       <div id="bandeja"></div>
     </section>
 
+    <!-- CRECER -->
+    <section id="crecer" class="vista" hidden>
+      <div id="crecer-permisos" class="banner" hidden></div>
+
+      <h2 class="titulo-lista">Camino a Afiliado</h2>
+      <article class="tarjeta" id="metas-afiliado"><p class="tenue">Cargando…</p></article>
+
+      <h2 class="titulo-lista">TikTok</h2>
+      <article class="tarjeta">
+        <div id="meta-tiktok"></div>
+        <form id="form-tiktok" class="fila">
+          <label for="campo-tiktok" class="oculto">Seguidores de TikTok</label>
+          <input id="campo-tiktok" inputmode="numeric" placeholder="¿Cuántos seguidores tienes hoy?">
+          <button class="secundario" type="submit">Anotar</button>
+        </form>
+      </article>
+
+      <h2 class="titulo-lista">Tu lugar en el directorio</h2>
+      <article class="tarjeta">
+        <div id="radar-texto" class="tenue">Se revisa solo cada 10 minutos mientras estás en vivo.</div>
+        <button id="revisar-radar" class="secundario ancho">Revisar ahora</button>
+      </article>
+
+      <h2 class="titulo-lista">Raid al terminar</h2>
+      <article class="tarjeta">
+        <div id="raid-texto" class="tenue">Antes de terminar, busca un canal en español del mismo juego y de tu tamaño. Raidear a canales parecidos crea amistades y raids de regreso.</div>
+        <button id="buscar-raid" class="secundario ancho">Buscar canal para raidear</button>
+        <div id="raid-opciones" class="resultados"></div>
+      </article>
+
+      <h2 class="titulo-lista">Calendario de clips</h2>
+      <article class="tarjeta lista" id="calendario"><div class="fila tenue">Sin clips programados todavía.</div></article>
+
+      <h2 class="titulo-lista">Reporte semanal</h2>
+      <article class="tarjeta">
+        <p class="tenue">Cópialo y pégalo en un proyecto de Claude o ChatGPT llamado "Entrenador del canal". Te dice qué funcionó y qué cambiar.</p>
+        <button id="copiar-semanal" class="primario ancho">Copiar para mi entrenador</button>
+      </article>
+    </section>
+
     <!-- DIAGNÓSTICO -->
     <section id="diagnostico" class="vista" hidden>
       <article class="tarjeta lista" id="semaforos"></article>
@@ -135,6 +176,7 @@
     <a href="#vivo" data-vista="vivo"><span aria-hidden="true">◉</span>En vivo</a>
     <a href="#chat" data-vista="chat"><span aria-hidden="true">💬</span>Chat</a>
     <a href="#publicar" data-vista="publicar"><span aria-hidden="true">📣</span>Publicar<b id="contador-bandeja" hidden></b></a>
+    <a href="#crecer" data-vista="crecer"><span aria-hidden="true">📈</span>Crecer</a>
     <a href="#diagnostico" data-vista="diagnostico"><span aria-hidden="true">🩺</span>Diagnóstico<b id="contador-fallas" hidden></b></a>
   </nav>
 </div>

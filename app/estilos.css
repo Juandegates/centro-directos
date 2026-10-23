@@ -97,7 +97,7 @@ button:disabled { opacity: .5; }
 .bitacora .error { color: var(--mal); } .bitacora .aviso { color: var(--aviso); }
 summary { cursor: pointer; font-weight: 600; min-height: 28px; }
 
-.navegacion { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: #15171b; border-top: 1px solid var(--borde); padding: 6px 6px max(10px, env(safe-area-inset-bottom)); z-index: 3; }
+.navegacion { position: fixed; bottom: 0; left: 0; right: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); background: #15171b; border-top: 1px solid var(--borde); padding: 6px 6px max(10px, env(safe-area-inset-bottom)); z-index: 3; }
 .navegacion a { min-height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--tenue); text-decoration: none; font-size: 12px; position: relative; }
 .navegacion a span { font-size: 18px; }
 .navegacion a.activo { color: var(--acento); font-weight: 600; }
@@ -108,3 +108,13 @@ summary { cursor: pointer; font-weight: 600; min-height: 28px; }
 .pin input { font-size: 24px; text-align: center; letter-spacing: .3em; }
 
 .toast { position: fixed; left: 16px; right: 16px; bottom: calc(140px + env(safe-area-inset-bottom)); max-width: 520px; margin: 0 auto; background: #2a2d34; border: 1px solid var(--borde2); border-radius: 12px; padding: 12px 14px; z-index: 5; text-align: center; }
+
+.meta { display: flex; flex-direction: column; gap: 4px; }
+.meta + .meta { margin-top: 8px; }
+.meta .fila { justify-content: space-between; font-size: 14px; }
+.barra { height: 8px; border-radius: 999px; background: var(--borde); overflow: hidden; }
+.barra span { display: block; height: 100%; background: var(--acento); border-radius: 999px; }
+.barra.lista span { background: var(--bien); }
+.etiquetas { display: flex; flex-wrap: wrap; gap: 6px; }
+.etiquetas span { font-size: 12px; border: 1px solid var(--borde2); border-radius: 999px; padding: 2px 8px; color: var(--tenue); }
+#form-tiktok input { flex: 1; }

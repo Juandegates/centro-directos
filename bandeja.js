@@ -18,8 +18,12 @@ export function agregar(item) {
   // Máximo 40 elementos y nada de más de 7 días: se borran solos (con sus videos).
   const limite = Date.now() - 7 * 24 * 3600_000;
   const quedan = [];
-  for (const [i, it] of items.entries()) {
-    if (i < 40 && new Date(it.creado).getTime() > limite) quedan.push(it);
+  // Los clips que esperan su día de publicación no cuentan para el máximo (solo vencen a los 7 días).
+  const esperando = (it) => it.tipo === 'clip' && it.programado && !it.publicado?.tiktok && !it.publicado?.youtube;
+  let normales = 0;
+  for (const it of items) {
+    const vigente = new Date(it.creado).getTime() > limite;
+    if (vigente && (esperando(it) || normales++ < 40)) quedan.push(it);
     else if (it.tipo === 'clip') rmSync(join(CARPETA_CLIPS, it.id), { recursive: true, force: true });
   }
   items = quedan;

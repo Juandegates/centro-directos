@@ -31,7 +31,9 @@
     "minutosEntreClips": 3,
     "minimoMensajes": 5,
     "minimoReacciones": 4,
-    "zoomVertical": 0.7
+    "zoomVertical": 0.7,
+    "gancho": true,
+    "marcaCanal": true
   },
   "youtube": {
     "segundosEntreLecturas": 10
@@ -45,5 +47,23 @@
   },
   "modoPrueba": true,
   "buscarEnInternet": true,
-  "versionConfig": 2
+  "versionConfig": 2,
+  "momentos": {
+    "activo": true,
+    "dbSobreNormal": 6,
+    "puntosParaClip": 7,
+    "minutosEntreClips": 8,
+    "maxPorDirecto": 6,
+    "minutosRevision": 12
+  },
+  "publicar": {
+    "hora": "18:00",
+    "porDia": 1
+  },
+  "crecer": {
+    "etiquetasAutomaticas": true,
+    "sugerirTitulo": true,
+    "reporteSemanal": true,
+    "horaReporte": "20:00"
+  }
 }

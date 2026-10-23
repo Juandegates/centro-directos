@@ -1,4 +1,4 @@
-// Centro de Directos · v2: todo automático. Tú solo le das "Transmitir" en la PS5.
+// Centro de Directos · v3: todo automático y enfocado en crecer. Tú solo le das "Transmitir" en la PS5.
 import { hostname } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { randomInt } from 'node:crypto';
@@ -8,6 +8,9 @@ import { crearCaptura } from './captura.js';
 import { crearDatos } from './datos.js';
 import { crearClips } from './clips.js';
 import { crearPromos } from './promos.js';
+import { crearMomentos } from './momentos.js';
+import { crearCalendario } from './calendario.js';
+import { crearCrecer, capitulos } from './crecer.js';
 import { iniciarServidor } from './servidor.js';
 import { probarTodo } from './diagnostico.js';
 import { revisarVersion, actualizar } from './actualizar.js';
@@ -177,6 +180,20 @@ async function detenerYoutube() {
   marcar('envioYoutube', 'apagado', 'Sin directo');
   marcar('chatYoutube', 'apagado', 'Sin directo');
   if (directo) await youtube.terminarDirecto(directo.id).catch((e) => log('No pude cerrar el directo de YouTube: ' + e.message, { nivel: 'aviso' }));
+  return directo;
+}
+
+async function arreglarVideoYoutube(directo, { juego, titulo, minutos }) {
+  const momentos = ctx.momentos.lista().filter((m) => m.puntos >= 6);
+  const caps = capitulos(directo.inicio, momentos);
+  const descripcion = [
+    `🎮 ${juego} en PS5 · directo de ${minutos} min.`,
+    momentos.length ? `Lo mejor: ${momentos.sort((a, b) => b.puntos - a.puntos).slice(0, 3).map((m) => m.que).join(' · ')}.` : '',
+    caps ? `\nCapítulos:\n${caps}` : '',
+    `\nHago directos ${ctx.datos.actual().horario}. ¡Suscríbete para no perderte el siguiente!`,
+  ].filter(Boolean).join('\n');
+  await youtube.actualizarVideo({ id: directo.id, titulo: titulo || `${juego} en PS5`, descripcion, etiquetas: [juego, 'PS5', 'gameplay', 'español', 'en vivo'] });
+  log('📺 Le puse descripción y capítulos al directo guardado en YouTube');
 }
 
 async function sincronizarTituloYoutube(titulo) {
@@ -197,7 +214,9 @@ async function alEmpezar() {
   marcar('directo', 'ok', `En vivo: ${d.juego}`);
   ctx.bots.twitch.nuevoDirecto();
   ctx.bots.youtube.nuevoDirecto();
+  ctx.momentos.nuevoDirecto();
   ctx.captura.iniciar();
+  ctx.crecer.alEmpezar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
   await iniciarYoutube();
   ctx.promos.alEmpezar().catch(() => {});
   // Al minuto y medio, un resumen de cómo arrancó todo.
@@ -215,10 +234,18 @@ async function alTerminar() {
   const minutos = inicioDirecto ? Math.round((Date.now() - inicioDirecto) / 60_000) : 0;
   inicioDirecto = null;
   marcar('directo', 'apagado', 'Sin directo');
+  const d = ctx.datos.actual();
   ctx.captura.detener();
-  await detenerYoutube();
+  const directoYt = await detenerYoutube();
   avisar('⚫ Terminó tu directo', `Duró ${minutos} min. Preparando el resumen…`, { etiquetas: ['black_circle'], clave: 'fin', cadaMinutos: 30 });
+  await ctx.crecer.alTerminar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
   if (minutos >= 5) ctx.promos.alTerminar({ minutos }).catch(() => {});
+  // Los clips de hoy se reparten en los próximos días (los mejores primero).
+  setTimeout(() => { ctx.calendario.programar(); ctx.calendario.revisar().catch(() => {}); }, 90_000);
+  if (directoYt && minutos >= 5) {
+    setTimeout(() => arreglarVideoYoutube(directoYt, { juego: d.juego, titulo: d.titulo, minutos })
+      .catch((e) => log('No pude ponerle descripción al video de YouTube: ' + e.message, { nivel: 'aviso' })), 120_000);
+  }
 }
 
 // ---------- Arranque con la sesión de Twitch ----------
@@ -227,7 +254,9 @@ async function iniciar() {
   const yo = await twitch.idDeUsuario();
   const canal = await twitch.idDeUsuario(process.env.TWITCH_CANAL);
   const faltan = twitch.permisosFaltantes();
-  if (faltan.length) marcar('twitch', 'error', 'La v2 necesita permisos nuevos: abre http://localhost:3000/twitch en la PC y autoriza', faltan.join(', '));
+  const extra = twitch.permisosExtraFaltantes();
+  if (faltan.length) marcar('twitch', 'error', 'Faltan permisos de Twitch: abre http://localhost:3000/twitch en la PC y autoriza', faltan.join(', '));
+  else if (extra.length) marcar('twitch', 'aviso', 'Para raids y seguidores nuevos, autoriza otra vez: http://localhost:3000/twitch (en la PC)', extra.join(', '));
   else marcar('twitch', 'ok', `Sesión de ${yo.display_name}`);
   log(`Canal: ${canal.display_name}`);
 
@@ -251,8 +280,11 @@ async function iniciar() {
   };
   ctx.clips = crearClips({
     captura: ctx.captura, leerConfig, datos: ctx.datos, avisar, urlApp,
-    crearClipTwitch: () => twitch.crearClip(canal.id),
+    crearClipTwitch: () => twitch.crearClip(canal.id), canalLogin: canal.login,
   });
+  ctx.momentos = crearMomentos({ captura: ctx.captura, leerConfig, datos: ctx.datos, clips: ctx.clips });
+  ctx.calendario = crearCalendario({ leerConfig, avisar, urlApp, enVivo: () => ctx.datos.actual().enVivo });
+  ctx.crecer = crearCrecer({ canal, datos: ctx.datos, leerConfig, avisar, urlApp });
   ctx.promos = crearPromos({ datos: ctx.datos, avisar, urlApp, urlTwitch: () => `https://twitch.tv/${canal.login}` });
 
   twitch.escucharEventos({
@@ -266,6 +298,15 @@ async function iniciar() {
     },
     alEnVivo: () => { log('Twitch avisa: ¡empezó tu directo!'); ctx.datos.ponerVivo(true); ctx.datos.refrescar(); },
     alFin: () => { log('Twitch avisa: terminó tu directo'); ctx.datos.ponerVivo(false); },
+    alRaid: (ev) => {
+      log(`🎉 Raid de ${ev.from_broadcaster_user_name} con ${ev.viewers} personas`);
+      avisar('🎉 ¡Te raidearon!', `${ev.from_broadcaster_user_name} llegó con ${ev.viewers} personas. El bot ya les dio la bienvenida.`, { etiquetas: ['tada'], clave: 'raid-' + ev.from_broadcaster_user_id, prioridad: 4 });
+      ctx.bots.twitch.raid({ nombre: ev.from_broadcaster_user_name, espectadores: ev.viewers }).catch(() => {});
+    },
+    alSeguidor: (ev) => {
+      log(`💜 Nuevo seguidor: ${ev.user_name}`);
+      ctx.bots.twitch.seguidor(ev.user_name);
+    },
   });
 }
 
@@ -337,6 +378,37 @@ const rutas = {
     return { ok: true, mensaje: 'Armando el clip; te aviso cuando esté listo (tarda como 1 minuto).' };
   },
   'GET /api/bitacora': () => verBitacora(150),
+  // ---------- Crecer ----------
+  'GET /api/crecer': () => {
+    if (!ctx) return { sinSesion: true };
+    return { ...ctx.crecer.estado(), metas: ctx.crecer.metas(), proximos: ctx.calendario.proximos(), permisosFaltantes: twitch.permisosExtraFaltantes() };
+  },
+  'POST /api/crecer/radar': async () => { necesitaCtx(); return (await ctx.crecer.revisarRadar()) ?? { mensaje: 'El radar funciona cuando estás en vivo y con categoría' }; },
+  'POST /api/crecer/titulo': async ({ cuerpo }) => {
+    necesitaCtx();
+    if (cuerpo.nuevo) return ctx.crecer.sugerirTituloYEtiquetas();
+    const s = ctx.crecer.estado().sugerencia;
+    if (!s) throw new Error('No hay título sugerido ahorita');
+    if (cuerpo.usar) {
+      await twitch.cambiarCanal(ctx.canal.id, { titulo: s.titulo, etiquetas: s.etiquetas });
+      await ctx.datos.refrescar();
+      yt.ultimoTitulo = 0;
+      await sincronizarTituloYoutube(s.titulo);
+      log('Título y etiquetas sugeridos aplicados desde la app');
+    }
+    ctx.crecer.descartarSugerencia();
+    return { ok: true };
+  },
+  'GET /api/crecer/raid': async () => { necesitaCtx(); return ctx.crecer.sugerirRaid(); },
+  'POST /api/crecer/raid': async ({ cuerpo }) => {
+    necesitaCtx();
+    if (!ctx.datos.actual().enVivo) throw new Error('Solo puedes raidear mientras estás en vivo');
+    await ctx.crecer.raidear(String(cuerpo.id));
+    return { ok: true, mensaje: 'Raid en camino: Twitch cuenta 90 segundos y manda a tu gente. Después ya puedes terminar el directo en la PS5.' };
+  },
+  'POST /api/crecer/tiktok': ({ cuerpo }) => { necesitaCtx(); return ctx.crecer.anotarTikTok(cuerpo.total); },
+  'GET /api/crecer/reporte': () => { necesitaCtx(); return ctx.crecer.reporteSemanal(); },
+  'POST /api/crecer/programar': () => { necesitaCtx(); ctx.calendario.programar(); return { proximos: ctx.calendario.proximos() }; },
   'GET /api/reporte': () => reporte({ canal: ctx?.canal.display_name ?? '(sin sesión)', enVivo: ctx?.datos.actual().enVivo ?? false, cuotaYoutube: youtube.cuotaUsada() }),
   'POST /api/probar': async () => {
     necesitaCtx();
@@ -363,7 +435,12 @@ const paginasLocales = {
     log('Sesión de Twitch guardada');
     if (ctx) {
       marcar('twitch', 'ok', 'Permisos de Twitch actualizados');
-      return { html: '✅ Listo, permisos de Twitch actualizados. Puedes cerrar esta pestaña.' };
+      // Los avisos de seguidores nuevos se activan al reconectar: reiniciamos si no estás en vivo.
+      if (!ctx.datos.actual().enVivo) {
+        setTimeout(() => process.exit(0), 2000); // iniciar-centro.bat lo vuelve a abrir solo
+        return { html: '✅ Listo, permisos de Twitch actualizados. El Centro se reinicia solo en unos segundos. Puedes cerrar esta pestaña.' };
+      }
+      return { html: '✅ Listo, permisos de Twitch actualizados. Los avisos de seguidores nuevos se activan la próxima vez que se reinicie el Centro.' };
     }
     iniciar().catch((e) => marcar('twitch', 'error', 'No pude iniciar', e.message));
     return { html: '✅ Listo, ya iniciaste sesión en Twitch. Puedes cerrar esta pestaña.' };

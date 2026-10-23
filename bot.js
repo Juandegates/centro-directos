@@ -232,8 +232,37 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
   setInterval(leerTanda, (leerConfig().segundosParaLeerChat ?? 6) * 1000);
   setInterval(animar, 30_000);
 
+  // Eventos del canal (raids, seguidores nuevos): el bot reacciona en el chat como tú.
+  let seguidoresPendientes = [];
+  let ultimoGracias = 0;
+  async function evento(instruccion) {
+    if (pausado()) return;
+    // Esperamos a que termine la respuesta que esté en curso (máx. 1 min); nunca contestamos encima.
+    for (let i = 0; i < 120 && ocupado; i++) await new Promise((r) => setTimeout(r, 500));
+    if (ocupado) return;
+    ocupado = true;
+    try {
+      await hablar(`Chat reciente:\n${historial.join('\n') || '(vacio)'}\n\n${instruccion}`, instrucciones(leerConfig(), datos.actual(), plataforma));
+    } finally { ocupado = false; }
+  }
+  // Varios follows seguidos se agradecen juntos, máximo una vez cada 2 minutos.
+  setInterval(() => {
+    if (!seguidoresPendientes.length || Date.now() - ultimoGracias < 120_000 || !datos.actual().enVivo) return;
+    const nombres = seguidoresPendientes.splice(0).map((n) => '@' + n).join(', ');
+    ultimoGracias = Date.now();
+    evento(`Acaban de seguir el canal: ${nombres}. Agradeceles en UN mensaje corto (1 frase), natural, sin exagerar.`).catch(() => {});
+  }, 15_000);
+
   return {
-    nuevoDirecto() { saludadosHoy = new Set(); },
+    nuevoDirecto() { saludadosHoy = new Set(); seguidoresPendientes = []; },
+    raid({ nombre, espectadores }) {
+      ultimoMensajeChat = Date.now();
+      return evento(
+        `¡Te acaba de llegar un RAID de @${nombre} con ${espectadores} personas! Escribe UN mensaje (2 frases maximo): agradece a @${nombre} y a su gente con emocion, ` +
+        'diles en una frase que estas jugando y que esta pasando ahorita (mira las imagenes si hay), y lanza una pregunta facil para que escriban. Saluda a todos en general, no uno por uno.',
+      );
+    },
+    seguidor(nombre) { if (nombre && datos.actual().enVivo && !seguidoresPendientes.includes(nombre)) seguidoresPendientes.push(nombre); },
     // Llamar con cada mensaje que llega al chat de esta plataforma.
     async recibir({ usuarioId, nombre, texto, esMio }) {
       ultimoMensajeChat = Date.now();

@@ -43,6 +43,8 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
   let ultimaNota = 0;
   let ultimaRevision = 0;
   let sospechas = 0;
+  let sinVivoSeguidas = 0;
+  let vivoDesde = 0;
 
   async function refrescar() {
     try {
@@ -57,7 +59,12 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
       if (tituloAntes && tituloAntes !== estado.titulo) alCambioTitulo?.(estado.titulo);
       estado.espectadores = directo?.viewer_count ?? 0;
       estado.inicio = directo?.started_at ?? null;
-      ponerVivo(Boolean(directo));
+      // Twitch a veces tarda en mostrarte "en vivo" justo al empezar: para dar por terminado el directo
+      // pedimos 3 revisiones seguidas sin directo (≈3 min). El aviso de fin de Twitch sí cuenta al instante.
+      if (directo) { sinVivoSeguidas = 0; ponerVivo(true); } else if (estado.enVivo) {
+        sinVivoSeguidas++;
+        if (sinVivoSeguidas >= 3 && Date.now() - vivoDesde > 3 * 60_000) ponerVivo(false);
+      }
       marcar('internet', 'ok', 'Conectado');
     } catch (e) {
       const sinRed = e.cause?.code || e.name === 'TimeoutError' || /fetch failed/i.test(e.message);
@@ -69,7 +76,9 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
   function ponerVivo(vivo) {
     if (vivo === estado.enVivo) return;
     estado.enVivo = vivo;
+    sinVivoSeguidas = 0;
     if (vivo) {
+      vivoDesde = Date.now();
       memoria.inicios = [...memoria.inicios, new Date().toISOString()].slice(-60);
       memoria.directos = [...memoria.directos, { inicio: new Date().toISOString(), juego: estado.juego, titulo: estado.titulo }].slice(-30);
       guardar();

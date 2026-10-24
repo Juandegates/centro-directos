@@ -67,7 +67,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     }
   }, 5_000);
 
-  async function crear(motivo, { puntos = null, que = '', saltarEspera = false } = {}) {
+  async function crear(motivo, { puntos = null, que = '', saltarEspera = false, segundos = null } = {}) {
     const c = leerConfig().clips ?? {};
     if (trabajando || !captura.activa()) return null;
     if (Date.now() - ultimoClip < (c.minutosEntreClips ?? 3) * 60_000 && motivo !== 'manual' && !saltarEspera) return null;
@@ -87,7 +87,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
 
       // Esperamos para incluir lo que pasó justo después del momento.
       await new Promise((r) => setTimeout(r, 15_000));
-      const pedazos = captura.pedazos(c.segundos ?? 40);
+      const pedazos = captura.pedazos(segundos ?? c.segundos ?? 40);
       if (pedazos.length < 2) throw new Error('Todavía no hay suficiente grabación para el clip');
 
       mkdirSync(carpeta, { recursive: true });
@@ -118,7 +118,9 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
         log('No pude poner el texto encima del clip; lo armo sin texto: ' + e.message, { parte: 'clips', nivel: 'aviso' });
         return armarVertical(false);
       });
-      await correrFfmpeg(config, ['-ss', '3', '-i', horizontal, '-frames:v', '1', '-vf', 'scale=480:-2', portada]);
+      // Portada: la imagen del momento exacto que se detectó (la acción), no el segundo 3 del clip.
+      if (fotos.length) writeFileSync(portada, Buffer.from(fotos.at(-1).base64, 'base64'));
+      else await correrFfmpeg(config, ['-ss', '3', '-i', horizontal, '-frames:v', '1', '-vf', 'scale=480:-2', portada]);
 
       const item = agregar({
         id, tipo: 'clip', motivo, puntos, gancho: textos.gancho,

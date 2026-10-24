@@ -43,7 +43,7 @@ export function crearCaptura({ canal, leerConfig }) {
         '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-f', 'segment', '-segment_time', '10',
         '-reset_timestamps', '1', '-strftime', '1', join(CARPETA, '%Y%m%d-%H%M%S.ts'),
         // 2) Imágenes pequeñas para la IA
-        '-map', '0:v:0', '-vf', `fps=1/${cada},scale=640:-2`, '-q:v', '6', '-f', 'image2pipe', '-c:v', 'mjpeg', 'pipe:1',
+        '-map', '0:v:0', '-vf', `fps=1/${cada},scale=512:-2`, '-q:v', '7', '-f', 'image2pipe', '-c:v', 'mjpeg', 'pipe:1',
       ],
       alError: (msg) => marcar('captura', 'error', msg + '. ¿Está instalado Streamlink?'),
       alTerminar: (codigo, errores) => {

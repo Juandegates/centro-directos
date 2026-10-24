@@ -36,7 +36,8 @@
     "marcaCanal": true
   },
   "youtube": {
-    "segundosEntreLecturas": 10
+    "segundosEntreLecturas": 10,
+    "segundosChatCallado": 20
   },
   "iaLocal": {
     "activa": false,
@@ -47,7 +48,6 @@
   },
   "modoPrueba": true,
   "buscarEnInternet": true,
-  "versionConfig": 2,
   "momentos": {
     "activo": true,
     "dbSobreNormal": 6,
@@ -65,5 +65,6 @@
     "sugerirTitulo": true,
     "reporteSemanal": true,
     "horaReporte": "20:00"
-  }
+  },
+  "botsIgnorados": []
 }

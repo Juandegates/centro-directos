@@ -32,10 +32,12 @@ configurarIA(leerConfig);
 try {
   const ruta = new URL('./config.json', import.meta.url);
   const c = leerConfig();
-  if ((c.versionConfig ?? 1) < 2) {
+  // Cada cambio se aplica una sola vez (se anota en ajustes.json, que nunca se reemplaza al actualizar).
+  const hechas = ajustes().migraciones ?? [];
+  if (!hechas.includes('animar-20')) {
     if (c.animarChat?.minutosSinMensajes === 5) c.animarChat.minutosSinMensajes = 20;
-    c.versionConfig = 2;
     writeFileSync(ruta, JSON.stringify(c, null, 2) + '\n');
+    guardarAjustes({ migraciones: [...hechas, 'animar-20'] });
   }
 } catch (e) { log('No pude actualizar config.json: ' + e.message, { nivel: 'aviso' }); }
 
@@ -121,11 +123,12 @@ function arrancarRelevo(rtmp) {
         if (!yt.directo) return;
         fallas++;
         const espera = Math.min(60, 5 * fallas);
-        marcar('envioYoutube', fallas >= 3 ? 'error' : 'aviso', `Se cortó el envío a YouTube; reintento en ${espera} s`, errores || `código ${codigo}`);
+        // La primera falla suele ser que el directo está terminando: reintentamos sin alarmar.
+        if (fallas >= 2) marcar('envioYoutube', fallas >= 3 ? 'error' : 'aviso', `Se cortó el envío a YouTube; reintento en ${espera} s`, errores || `código ${codigo}`);
         setTimeout(() => yt.directo && lanzar(), espera * 1000);
       },
     });
-    marcar('envioYoutube', 'aviso', 'Enviando señal a YouTube… (confirmando)');
+    if (fallas === 0) marcar('envioYoutube', 'aviso', 'Enviando señal a YouTube… (confirmando)');
   };
   lanzar();
 }
@@ -138,12 +141,15 @@ async function revisarYoutube() {
   } catch { /* se revisa en la siguiente vuelta */ }
 }
 
+let ultimoMensajeYt = 0;
 async function leerChatYoutube() {
   if (yt.chatActivo || !yt.directo?.chatId) return;
   yt.chatActivo = true;
+  ultimoMensajeYt = Date.now();
+  const directoDeEsteChat = yt.directo; // si se crea otro directo, este ciclo se detiene
   let pagina = null;
   let primero = true;
-  while (yt.directo && yt.chatActivo) {
+  while (yt.directo === directoDeEsteChat && yt.chatActivo) {
     try {
       if (youtube.cuotaUsada() > 9000) {
         marcar('chatYoutube', 'aviso', 'Cuota diaria de YouTube casi agotada: pauso el chat hasta mañana');
@@ -152,6 +158,7 @@ async function leerChatYoutube() {
       const r = await youtube.leerChat(yt.directo.chatId, pagina);
       pagina = r.siguiente;
       marcar('chatYoutube', 'ok', 'Leyendo el chat de YouTube');
+      if (r.mensajes.some((m) => !m.esMio)) ultimoMensajeYt = Date.now();
       if (!primero) {
         for (const m of r.mensajes) {
           if (!m.esMio) ctx.clips.registrarMensaje({ nombre: m.nombre, texto: m.texto, plataforma: 'youtube' });
@@ -160,14 +167,17 @@ async function leerChatYoutube() {
       }
       primero = false;
       if (r.terminado) break;
-      // Cada lectura gasta cuota: leemos cada 10 s como mínimo (más espaciado si YouTube lo pide).
-      await new Promise((ok) => setTimeout(ok, Math.max(r.esperaMs, (leerConfig().youtube?.segundosEntreLecturas ?? 10) * 1000)));
+      // Cada lectura gasta cuota: cada 10 s si hay plática, cada 20 s si el chat lleva 3 min callado.
+      const cy = leerConfig().youtube ?? {};
+      const callado = Date.now() - ultimoMensajeYt > 3 * 60_000;
+      const seg = callado ? (cy.segundosChatCallado ?? 20) : (cy.segundosEntreLecturas ?? 10);
+      await new Promise((ok) => setTimeout(ok, Math.max(r.esperaMs, seg * 1000)));
     } catch (e) {
       marcar('chatYoutube', 'aviso', 'No pude leer el chat de YouTube; reintento', e.message);
       await new Promise((ok) => setTimeout(ok, 30_000));
     }
   }
-  yt.chatActivo = false;
+  if (yt.directo === directoDeEsteChat || !yt.directo) yt.chatActivo = false;
 }
 
 async function detenerYoutube() {
@@ -248,6 +258,13 @@ async function alTerminar() {
   }
 }
 
+// Bots de otros servicios que escriben en tu chat: el Centro no les contesta ni los cuenta para clips.
+const BOTS = ['streamelements', 'nightbot', 'moobot', 'streamlabs', 'fossabot', 'wizebot', 'soundalerts', 'sery_bot', 'kofistreambot', 'botrixoficial', 'commanderroot', 'pokemoncommunitygame', 'own3d', 'tangiabot', 'blerp', 'lumiastream', 'creatisbot', 'frostytoolsdotcom'];
+const esBotConocido = (nombre) => {
+  const n = String(nombre ?? '').toLowerCase();
+  return [...BOTS, ...(leerConfig().botsIgnorados ?? []).map((x) => String(x).toLowerCase())].includes(n);
+};
+
 // ---------- Arranque con la sesión de Twitch ----------
 async function iniciar() {
   if (ctx) return;
@@ -293,6 +310,7 @@ async function iniciar() {
     alMensaje: (ev) => {
       const texto = ev.message?.text ?? '';
       const esMio = ev.chatter_user_id === yo.id;
+      if (!esMio && esBotConocido(ev.chatter_user_login ?? ev.chatter_user_name)) return; // StreamElements, Nightbot…
       if (!esMio) ctx.clips.registrarMensaje({ nombre: ev.chatter_user_name, texto, plataforma: 'twitch' });
       ctx.bots.twitch.recibir({ usuarioId: ev.chatter_user_id, nombre: ev.chatter_user_name, texto, esMio }).catch(() => {});
     },

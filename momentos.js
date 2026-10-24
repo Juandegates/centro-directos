@@ -8,10 +8,15 @@
 //    La pelea solo termina con una señal clara (ganaste o perdiste). Entonces se revisa lo ya grabado
 //    para encontrar el momento exacto y se hace el clip del final del primer intento y, si perdiste,
 //    otro cuando por fin lo derrotas.
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { CARPETA } from './captura.js';
-import { medirVolumen } from './herramientas.js';
+import { medirVolumen, correrFfmpeg } from './herramientas.js';
+
+// Pedacitos de ~30 s de cada momento revisado: con ellos se arma el video resumen de 1:30 al final.
+export const CARPETA_PIEZAS = fileURLToPath(new URL('./piezas/', import.meta.url));
+const MAX_PIEZAS = 40;
 import { preguntarIA } from './ia.js';
 import { log } from './estado.js';
 
@@ -36,6 +41,31 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
   let vencidos = new Set();
   let inicioVentana = Date.now(); // para "el mejor momento de cada 30 min"
   let ultimoClipHecho = 0;
+  let piezas = []; // { hora, puntos, que, ruta }
+
+  // Guarda ~30 s alrededor del momento (22 s antes y 10 s después), sin recomprimir.
+  async function guardarPieza(m) {
+    await esperar(12_000); // que se grabe lo que pasó justo después
+    if (!captura.activa()) return;
+    const rutas = captura.pedazosEntre(m.hora - 22_000, m.hora + 10_000);
+    if (!rutas.length) return;
+    mkdirSync(CARPETA_PIEZAS, { recursive: true });
+    const lista = join(CARPETA_PIEZAS, `${m.hora}.txt`);
+    const ruta = join(CARPETA_PIEZAS, `${m.hora}_${m.puntos}.ts`);
+    writeFileSync(lista, rutas.map((r) => `file '${r.replace(/\\/g, '/').replace(/'/g, "'\\''")}'`).join('\n'));
+    try {
+      await correrFfmpeg(leerConfig(), ['-f', 'concat', '-safe', '0', '-i', lista, '-c', 'copy', ruta]);
+      piezas.push({ hora: m.hora, puntos: m.puntos, que: m.que, ruta });
+      // Si ya hay muchas, se borra la peor calificada (las buenas se quedan).
+      if (piezas.length > MAX_PIEZAS) {
+        const peor = [...piezas].sort((a, b) => a.puntos - b.puntos || a.hora - b.hora)[0];
+        piezas = piezas.filter((p) => p !== peor);
+        rmSync(peor.ruta, { force: true });
+      }
+    } catch { /* pedacitos en uso: no pasa nada */ } finally {
+      rmSync(lista, { force: true });
+    }
+  }
 
   const cfg = () => ({
     activo: true, dbSobreNormal: 6, puntosParaClip: 7, minutosEntreClips: 8, maxPorDirecto: 6, minutosRevision: 12,
@@ -189,6 +219,7 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
       const m = { hora: Date.now(), puntos, que, motivo, clip: false, foto: puntos >= 5 ? fotos.at(-1) : null };
       momentos.push(m);
       if (momentos.length > 200) momentos.shift();
+      if (puntos >= 3) guardarPieza(m).catch(() => {}); // menús y pantallas de carga no sirven para el resumen
       const vida = j.vidaJefe !== null && j.vidaJefe !== undefined && Number.isFinite(Number(j.vidaJefe)) ? ` · jefe ${j.vidaJefe}%` : '';
       log(`🎯 Momento (${motivo}): ${puntos}/10 · ${que}${vida}`, { parte: 'clips' });
       // Las peleas de jefe se graban al final (ver seguirJefe), no al empezar.
@@ -271,11 +302,26 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
       ultimoClip = 0;
       jefe = null;
       vencidos = new Set();
+      piezas = [];
+      rmSync(CARPETA_PIEZAS, { recursive: true, force: true }); // las del directo anterior ya no sirven
       inicioVentana = Date.now();
       ultimoClipHecho = 0;
       ultimaEvaluacion = Date.now(); // la primera revisión periódica, a los pocos minutos
     },
     lista: () => momentos,
+    piezas: () => piezas,
+    // El Centro se reinició a media transmisión: recuperamos las piezas ya guardadas.
+    retomar() {
+      inicioVentana = Date.now();
+      ultimaEvaluacion = Date.now();
+      try {
+        piezas = readdirSync(CARPETA_PIEZAS).filter((f) => /^\d+_\d+\.ts$/.test(f)).map((f) => {
+          const [hora, puntos] = f.replace('.ts', '').split('_').map(Number);
+          return { hora, puntos, que: '', ruta: join(CARPETA_PIEZAS, f) };
+        });
+      } catch { piezas = []; }
+    },
+    borrarPiezas() { piezas = []; rmSync(CARPETA_PIEZAS, { recursive: true, force: true }); },
     _evaluar: (motivo) => evaluar(motivo), // para pruebas
   };
 }

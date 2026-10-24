@@ -10,7 +10,7 @@ import { VERSION, log } from './estado.js';
 const REPO = () => process.env.GITHUB_REPO || 'Juandegates/centro-directos';
 const AQUI = fileURLToPath(new URL('./', import.meta.url));
 // Nunca se sobrescriben: tus claves, sesiones, memoria, clips y grabaciones.
-const PROTEGIDOS = ['claves.txt', 'tokens.json', 'google-tokens.json', 'ajustes.json', 'memoria.json', 'conocidos.json', 'bandeja.json', 'config.json', 'estadisticas.json', 'busquedas.json', 'grabacion', 'clips'];
+const PROTEGIDOS = ['claves.txt', 'tokens.json', 'google-tokens.json', 'ajustes.json', 'memoria.json', 'conocidos.json', 'bandeja.json', 'config.json', 'estadisticas.json', 'busquedas.json', 'grabacion', 'clips', 'piezas'];
 
 const cabeceras = (extra = {}) => ({
   'User-Agent': 'centro-directos',

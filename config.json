@@ -77,7 +77,6 @@
   },
   "resumen": {
     "activo": true,
-    "minimoClips": 2,
-    "maximoClips": 6
+    "segundos": 90
   }
 }

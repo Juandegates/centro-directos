@@ -1,4 +1,7 @@
-// IA: primero Gemini (gratis, en la nube); si está saturado o en su límite, la IA de tu PC (Ollama).
+// IA: varias IAs gratis en la nube, cada una con su propio cupo (Gemini, Mistral y Groq), y la IA de tu PC
+// (Ollama) como último respaldo. Si una se satura o llega a su límite, el Centro pasa a la siguiente.
+// Las respuestas al chat usan primero la más rápida; las tareas de fondo (clips, notas, categoría)
+// usan primero la de cupo más grande, para que la rápida no se gaste.
 import { marcar } from './estado.js';
 
 const URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -115,7 +118,8 @@ async function gemini({ sistema, texto, imagenes, buscar }) {
       if (res.status !== 429) todosEnLimite = false;
       if ([429, 500, 503, 504, 404].includes(res.status)) {
         ultimoError = `${modelo} respondió ${res.status}`;
-        castigar(modelo, res.status === 404 ? 24 * 60 : 10);
+        // 429 = se acabó el cupo de ese modelo (suele ser del día): lo dejamos descansar una hora.
+        castigar(modelo, res.status === 404 ? 24 * 60 : res.status === 429 ? 60 : 10);
         avisos(`IA: ${ultimoError}; pruebo otro modelo…`);
         continue;
       }
@@ -155,19 +159,94 @@ async function local({ sistema, texto, imagenes }) {
   return (d.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\s+/g, ' ').trim();
 }
 
-export async function preguntarIA({ sistema, texto, imagenes = [], buscar = false }) {
-  let errorGemini = null;
-  if (Date.now() >= geminiPausadoHasta) {
-    try {
-      return await gemini({ sistema, texto, imagenes, buscar });
-    } catch (e) {
-      errorGemini = e;
-      if (e.limite) {
-        geminiPausadoHasta = Date.now() + 60_000;
-        marcar('ia', 'aviso', e.message + (configIA().iaLocal?.activa ? '; uso la IA de la PC por 1 minuto' : '; reintento en 1 minuto'), e.message);
+// ---------- Otras IAs gratis en la nube (formato compatible con OpenAI) ----------
+const PROVEEDORES = {
+  mistral: {
+    nombre: 'Mistral',
+    clave: () => process.env.MISTRAL_API_KEY,
+    url: 'https://api.mistral.ai/v1/chat/completions',
+    modelo: () => configIA().ia?.mistral ?? 'mistral-small-latest',
+    maxImagenes: 8,
+    imagen: (i) => ({ type: 'image_url', image_url: `data:${i.mime};base64,${i.base64}` }),
+  },
+  groq: {
+    nombre: 'Groq',
+    clave: () => process.env.GROQ_API_KEY,
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    modelo: () => configIA().ia?.groq ?? 'qwen/qwen3.8-27b',
+    maxImagenes: 3,
+    imagen: (i) => ({ type: 'image_url', image_url: { url: `data:${i.mime};base64,${i.base64}` } }),
+  },
+};
+const configurado = (p) => {
+  const k = PROVEEDORES[p]?.clave();
+  return Boolean(k && !k.startsWith('pega_aqui'));
+};
+const pausados = new Map(); // proveedor → hasta cuándo no usarlo
+
+async function compatible(p, { sistema, texto, imagenes }) {
+  const prov = PROVEEDORES[p];
+  const imgs = imagenes.slice(-prov.maxImagenes);
+  const res = await fetch(prov.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${prov.clave()}` },
+    body: JSON.stringify({
+      model: prov.modelo(),
+      temperature: 0.8,
+      max_tokens: 1500,
+      messages: [
+        { role: 'system', content: sistema },
+        { role: 'user', content: imgs.length ? [...imgs.map(prov.imagen), { type: 'text', text: texto }] : texto },
+      ],
+    }),
+    signal: AbortSignal.timeout(imgs.length ? 20_000 : 12_000),
+  });
+  if (!res.ok) {
+    const detalle = (await res.text()).slice(0, 300);
+    const e = new Error(`${prov.nombre} respondió ${res.status}: ${detalle}`);
+    e.status = res.status;
+    throw e;
+  }
+  const d = await res.json();
+  const t = d.choices?.[0]?.message?.content;
+  const texto2 = Array.isArray(t) ? t.map((x) => x.text ?? '').join('') : String(t ?? '');
+  const limpio = texto2.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\s+/g, ' ').trim();
+  if (!limpio) throw new Error(`${prov.nombre} respondió vacío`);
+  return limpio;
+}
+
+export const iasConfiguradas = () => ['gemini', ...Object.keys(PROVEEDORES).filter(configurado)];
+
+// uso: 'chat' (contestar en vivo: primero la más rápida) o 'fondo' (clips, notas, categoría: primero la de más cupo).
+export async function preguntarIA({ sistema, texto, imagenes = [], buscar = false, uso = 'fondo', solo = null }) {
+  const errores = [];
+  const orden = solo ? [solo] : uso === 'chat' ? ['gemini', 'groq', 'mistral'] : ['mistral', 'gemini', 'groq'];
+  for (const p of orden) {
+    if (p === 'gemini') {
+      if (Date.now() < geminiPausadoHasta) continue;
+      try {
+        return await gemini({ sistema, texto, imagenes, buscar });
+      } catch (e) {
+        errores.push(e.message);
+        if (e.limite) geminiPausadoHasta = Date.now() + 60_000;
       }
+      continue;
+    }
+    if (!configurado(p) || (pausados.get(p) ?? 0) > Date.now()) continue;
+    try {
+      const r = await compatible(p, { sistema, texto, imagenes });
+      marcar('ia', 'ok', `Funcionando (${PROVEEDORES[p].nombre})`);
+      return r;
+    } catch (e) {
+      errores.push(e.name === 'TimeoutError' ? `${PROVEEDORES[p].nombre} tardó demasiado` : e.message);
+      // Límite alcanzado: esa IA descansa 30 min. Otras fallas: 2 min.
+      pausados.set(p, Date.now() + (e.status === 429 ? 30 : 2) * 60_000);
+      avisos(`IA: ${errores.at(-1).slice(0, 120)}; pruebo otra…`);
     }
   }
+  const errorNube = errores.length ? new Error(`Ninguna IA de la nube respondió (${errores.at(-1).slice(0, 150)})`) : null;
+  if (errorNube) marcar('ia', 'aviso', errorNube.message + (configIA().iaLocal?.activa ? '; uso la IA de la PC' : '; reintento en un momento'), errores.join(' | ').slice(0, 1500));
+  const errorGemini = errorNube;
   try {
     const r = await local({ sistema, texto, imagenes });
     marcar('iaLocal', 'ok', `Respondió (${configIA().iaLocal?.modelo})`);
@@ -175,6 +254,7 @@ export async function preguntarIA({ sistema, texto, imagenes = [], buscar = fals
   } catch (e) {
     if (configIA().iaLocal?.activa) marcar('iaLocal', 'error', 'La IA de la PC no respondió', e.cause?.code ?? e.message);
     const final = new Error(errorGemini ? `${errorGemini.message}; y la IA de la PC tampoco respondió` : e.message);
+    final.errores = errores;
     final.limite = true;
     throw final;
   }

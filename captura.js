@@ -1,6 +1,6 @@
 // Mientras estás en vivo: graba tu directo en pedacitos de 10 s (para los clips) y saca
 // una imagen cada 2 s (para que el bot "vea"). Todo con una sola descarga de Twitch.
-// Las imágenes viven solo en memoria; los pedacitos se borran solos a los 20 minutos.
+// Las imágenes viven solo en memoria; los pedacitos se borran solos a los 35 minutos.
 import { mkdirSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { marcar } from './estado.js';
 export const CARPETA = fileURLToPath(new URL('./grabacion/', import.meta.url));
 const SOI = Buffer.from([0xff, 0xd8]);
 const EOI = Buffer.from([0xff, 0xd9]);
-const MINUTOS_GUARDADOS = 20;
+const MINUTOS_GUARDADOS = 35; // alcanza para "el mejor momento de cada 30 min" (≈2 GB a 1080p)
 
 export function crearCaptura({ canal, leerConfig }) {
   mkdirSync(CARPETA, { recursive: true });

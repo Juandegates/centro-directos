@@ -150,7 +150,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
     try {
       const imagenes = verPantalla();
       if (imagenes.length) texto += `\n\n(Te adjunto ${imagenes.length} imagenes de mi directo de los ultimos segundos.)`;
-      const r = await preguntarIA({ sistema, texto, imagenes });
+      const r = await preguntarIA({ sistema, texto, imagenes, uso: 'chat' });
       if (!r || r.includes(NADA) || pausado()) return true;
       const limpio = limpiarRespuesta(r);
       if (!limpio) {

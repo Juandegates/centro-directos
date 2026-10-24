@@ -5,6 +5,12 @@
 GEMINI_API_KEY=pega_aqui_tu_clave_de_gemini
 GEMINI_MODELO=gemini-flash-latest
 
+# --- IAs extra gratis (opcionales, se usan cuando Gemini se satura) ---
+# Mistral: console.mistral.ai (gratis, sin tarjeta; pide verificar tu teléfono)
+MISTRAL_API_KEY=pega_aqui_tu_clave_de_mistral
+# Groq: console.groq.com (gratis, sin tarjeta)
+GROQ_API_KEY=pega_aqui_tu_clave_de_groq
+
 # --- Buscador de internet para guías (tavily.com, 1,000 gratis al mes) ---
 TAVILY_API_KEY=pega_aqui_tu_clave_de_tavily
 

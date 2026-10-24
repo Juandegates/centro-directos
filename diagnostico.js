@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { statfsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { rutaFfmpeg, rutaStreamlink } from './herramientas.js';
-import { preguntarIA } from './ia.js';
+import { preguntarIA, iasConfiguradas } from './ia.js';
 import { buscar, buscadorConfigurado, usadasEsteMes } from './buscador.js';
 import * as twitch from './twitch.js';
 import * as youtube from './youtube.js';
@@ -59,10 +59,14 @@ export async function probarTodo({ leerConfig, canalId }) {
     const c = await youtube.miCanal();
     return `Canal "${c.nombre}" · cuota usada hoy: ${youtube.cuotaUsada()} de 10,000`;
   }));
-  resultados.push(await prueba('IA (Gemini o respaldo)', async () => {
-    const r = await preguntarIA({ sistema: 'Responde con una sola palabra.', texto: 'Di: listo' });
-    return `Respondió: ${r.slice(0, 40)}`;
-  }));
+  // Cada IA de la nube por separado, para saber cuáles funcionan.
+  for (const p of iasConfiguradas()) {
+    const nombre = { gemini: 'Gemini', mistral: 'Mistral', groq: 'Groq' }[p];
+    resultados.push(await prueba(`IA en la nube: ${nombre}`, async () => {
+      const r = await preguntarIA({ sistema: 'Responde con una sola palabra.', texto: 'Di: listo', solo: p });
+      return `Respondió: ${r.slice(0, 40)}`;
+    }));
+  }
   resultados.push(await prueba('Búsqueda en internet (guías del juego)', async () => {
     if (!buscadorConfigurado()) throw new Error('Falta TAVILY_API_KEY en claves.txt (cuenta gratis en tavily.com)');
     const r = await buscar('noticias de videojuegos esta semana ' + new Date().toISOString().slice(0, 10));

@@ -3,6 +3,7 @@
 // 2) Cuando algo suena más fuerte de lo normal (o cada cierto tiempo), la IA mira la pantalla
 //    y califica el momento del 1 al 10.
 // 3) Los momentos con buena calificación se vuelven clip solos.
+// 3b) Si en 30 minutos no salió ningún clip, se hace uno del mejor momento de ese rato (mínimo 5/10).
 // 4) Peleas de jefe: se siguen por su BARRA DE VIDA (los jefes con varias fases cambian de sala).
 //    La pelea solo termina con una señal clara (ganaste o perdiste). Entonces se revisa lo ya grabado
 //    para encontrar el momento exacto y se hace el clip del final del primer intento y, si perdiste,
@@ -33,10 +34,12 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
   let jefe = null;
   // Jefes ya vencidos en este directo (para no volver a seguirlos)
   let vencidos = new Set();
+  let inicioVentana = Date.now(); // para "el mejor momento de cada 30 min"
+  let ultimoClipHecho = 0;
 
   const cfg = () => ({
     activo: true, dbSobreNormal: 6, puntosParaClip: 7, minutosEntreClips: 8, maxPorDirecto: 6, minutosRevision: 12,
-    segundosRevisionJefe: 120, minutosSinVerJefe: 10,
+    segundosRevisionJefe: 120, minutosSinVerJefe: 10, minutosMejorMomento: 30, minimoMejorMomento: 5,
     ...(leerConfig().momentos ?? {}),
   });
 
@@ -92,7 +95,7 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
         rango: { desde: final.hora - 55_000, hasta: final.hora + 12_000 },
         fotosMomento: final.foto ? [final.foto] : null,
       }).catch(() => null);
-      if (item) { clipsHoy++; return final.resultado; }
+      if (item) { clipsHoy++; ultimoClipHecho = Date.now(); return final.resultado; }
       await esperar(10_000);
     }
     return final.resultado;
@@ -183,7 +186,7 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
       const j = leerJSON(r);
       const puntos = Math.max(1, Math.min(10, Math.round(Number(j.puntos) || 0)));
       const que = String(j.que ?? '').slice(0, 80);
-      const m = { hora: Date.now(), puntos, que, motivo, clip: false };
+      const m = { hora: Date.now(), puntos, que, motivo, clip: false, foto: puntos >= 5 ? fotos.at(-1) : null };
       momentos.push(m);
       if (momentos.length > 200) momentos.shift();
       const vida = j.vidaJefe !== null && j.vidaJefe !== undefined && Number.isFinite(Number(j.vidaJefe)) ? ` · jefe ${j.vidaJefe}%` : '';
@@ -194,7 +197,7 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
       if (puntos >= c.puntosParaClip && clipsHoy < c.maxPorDirecto && Date.now() - ultimoClip > c.minutosEntreClips * 60_000) {
         ultimoClip = Date.now(); // se aparta de una vez para no lanzar dos clips del mismo momento
         clips.crear(`momento: ${que}`, { puntos, que, saltarEspera: true })
-          .then((item) => { if (item) { clipsHoy++; m.clip = true; } else ultimoClip = 0; })
+          .then((item) => { if (item) { clipsHoy++; m.clip = true; ultimoClipHecho = Date.now(); } else ultimoClip = 0; })
           .catch(() => { ultimoClip = 0; });
       }
     } catch { /* la IA estaba ocupada; habrá más momentos */ } finally {
@@ -234,7 +237,31 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
     else if (Date.now() - ultimaEvaluacion > c.minutosRevision * 60_000) await evaluar('revisión periódica');
   }
 
+  // Cada 30 min sin clips: clip del mejor momento de ese rato (de lo ya grabado).
+  async function mejorDelRato() {
+    const c = cfg();
+    if (!captura.activa() || jefe) return;
+    const ahora = Date.now();
+    for (const m of momentos) if (m.foto && ahora - m.hora > 35 * 60_000) m.foto = null; // no guardar imágenes viejas
+    if (ahora - inicioVentana < c.minutosMejorMomento * 60_000) return;
+    const desde = inicioVentana;
+    inicioVentana = ahora;
+    if (ultimoClipHecho > desde) return; // ya salió algún clip en este rato
+    // Solo momentos que todavía estén grabados (se guardan 35 min).
+    const mejor = momentos.filter((m) => m.hora > desde && ahora - m.hora < 33 * 60_000 && !m.clip && m.puntos >= c.minimoMejorMomento)
+      .sort((a, b) => b.puntos - a.puntos || b.hora - a.hora)[0];
+    if (!mejor) { log(`🎬 En los últimos ${c.minutosMejorMomento} min no hubo un momento de al menos ${c.minimoMejorMomento}/10 para clip`, { parte: 'clips' }); return; }
+    log(`🎬 Mejor momento de los últimos ${c.minutosMejorMomento} min (${mejor.puntos}/10): ${mejor.que}`, { parte: 'clips' });
+    const item = await clips.crear(`mejor momento del rato: ${mejor.que}`, {
+      puntos: mejor.puntos, que: mejor.que, saltarEspera: true,
+      rango: { desde: mejor.hora - 45_000, hasta: mejor.hora + 15_000 },
+      fotosMomento: mejor.foto ? [mejor.foto] : null,
+    }).catch(() => null);
+    if (item) { mejor.clip = true; clipsHoy++; ultimoClipHecho = Date.now(); }
+  }
+
   setInterval(() => { revisarAudio().catch(() => {}); }, 10_000);
+  setInterval(() => { mejorDelRato().catch(() => {}); }, 60_000);
 
   return {
     nuevoDirecto() {
@@ -244,6 +271,8 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
       ultimoClip = 0;
       jefe = null;
       vencidos = new Set();
+      inicioVentana = Date.now();
+      ultimoClipHecho = 0;
       ultimaEvaluacion = Date.now(); // la primera revisión periódica, a los pocos minutos
     },
     lista: () => momentos,

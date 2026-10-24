@@ -11,6 +11,7 @@ import { crearPromos } from './promos.js';
 import { crearMomentos } from './momentos.js';
 import { crearCalendario } from './calendario.js';
 import { crearCrecer, capitulos } from './crecer.js';
+import { crearResumen } from './resumen.js';
 import { iniciarServidor } from './servidor.js';
 import { probarTodo } from './diagnostico.js';
 import { revisarVersion, actualizar } from './actualizar.js';
@@ -261,6 +262,7 @@ async function alEmpezar() {
 
 async function alTerminar() {
   const minutos = inicioDirecto ? Math.round((Date.now() - inicioDirecto) / 60_000) : 0;
+  const desde = inicioDirecto ?? Date.now() - minutos * 60_000;
   inicioDirecto = null;
   marcar('directo', 'apagado', 'Sin directo');
   const d = ctx.datos.actual();
@@ -269,8 +271,13 @@ async function alTerminar() {
   avisar('⚫ Terminó tu directo', `Duró ${minutos} min. Preparando el resumen…`, { etiquetas: ['black_circle'], clave: 'fin', cadaMinutos: 30 });
   await ctx.crecer.alTerminar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
   if (minutos >= 5) ctx.promos.alTerminar({ minutos }).catch(() => {});
-  // Los clips de hoy se reparten en los próximos días (los mejores primero).
-  setTimeout(() => { ctx.calendario.programar(); ctx.calendario.revisar().catch(() => {}); }, 90_000);
+  // A los 3 min (cuando ya terminaron los últimos clips): video resumen con lo mejor del directo,
+  // y luego los clips de hoy se reparten en los próximos días (los mejores primero).
+  setTimeout(async () => {
+    if (minutos >= 15) await ctx.resumen.armar({ desde, minutos }).catch((e) => log('No pude armar el video resumen: ' + e.message, { nivel: 'aviso' }));
+    ctx.calendario.programar();
+    ctx.calendario.revisar().catch(() => {});
+  }, 180_000);
   if (directoYt && minutos >= 5) {
     setTimeout(() => arreglarVideoYoutube(directoYt, { juego: d.juego, titulo: d.titulo, minutos })
       .catch((e) => log('No pude ponerle descripción al video de YouTube: ' + e.message, { nivel: 'aviso' })), 120_000);
@@ -321,6 +328,7 @@ async function iniciar() {
   ctx.momentos = crearMomentos({ captura: ctx.captura, leerConfig, datos: ctx.datos, clips: ctx.clips });
   ctx.calendario = crearCalendario({ leerConfig, avisar, urlApp, enVivo: () => ctx.datos.actual().enVivo });
   ctx.crecer = crearCrecer({ canal, datos: ctx.datos, leerConfig, avisar, urlApp });
+  ctx.resumen = crearResumen({ leerConfig, datos: ctx.datos, avisar, urlApp, canalLogin: canal.login });
   ctx.promos = crearPromos({ datos: ctx.datos, avisar, urlApp, urlTwitch: () => `https://twitch.tv/${canal.login}` });
 
   twitch.escucharEventos({

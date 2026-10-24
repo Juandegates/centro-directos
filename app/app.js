@@ -280,7 +280,7 @@ async function cargarBandeja(enfocar) {
     const fecha = new Date(i.creado).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
     if (i.tipo === 'clip') {
       return `<article class="item ${hecho ? 'hecho' : ''}" id="item-${esc(i.id)}">
-        <div><strong>🎬 ${esc(i.titulo)}</strong><div class="tenue">${esc(fecha)} · ${esc(i.juego ?? '')} · ${esc(i.motivo ?? '')}${i.puntos ? ` · ${i.puntos}/10` : ''}</div>
+        <div><strong>${i.resumen ? '🎞️' : '🎬'} ${esc(i.titulo)}</strong><div class="tenue">${esc(fecha)} · ${esc(i.juego ?? '')} · ${esc(i.motivo ?? '')}${i.puntos ? ` · ${i.puntos}/10` : ''}</div>
           ${i.programado && !hecho ? `<div class="tenue">📅 Toca publicarlo: ${esc(fechaCorta(i.programado))}</div>` : ''}</div>
         <video controls playsinline preload="none" poster="/media/${esc(i.archivos.portada)}" src="/media/${esc(i.archivos.vertical)}"></video>
         ${i.tituloShorts ? `<div class="tenue">Título para Shorts (${i.tituloShorts.length}/100)</div><div class="texto">${esc(i.tituloShorts)}</div>
@@ -290,7 +290,7 @@ async function cargarBandeja(enfocar) {
           <a class="boton primario" href="/media/${esc(i.archivos.vertical)}" download="clip-${esc(i.id)}.mp4">⬇ Video vertical</a>
           <button data-copiar="${esc(i.textoTikTok)}">Copiar texto</button>
           <a class="boton" href="${esc(urlX(i.textoX))}" target="_blank" rel="noopener">Publicar en X</a>
-          <a class="boton" href="/media/${esc(i.archivos.horizontal)}" download="clip-${esc(i.id)}-horizontal.mp4">⬇ Horizontal</a>
+          ${i.archivos.horizontal ? `<a class="boton" href="/media/${esc(i.archivos.horizontal)}" download="clip-${esc(i.id)}-horizontal.mp4">⬇ Horizontal</a>` : ''}
           ${i.twitch?.url ? `<a class="boton" href="${esc(i.twitch.url)}" target="_blank" rel="noopener">Clip en Twitch</a>` : ''}
           <button data-borrar="${esc(i.id)}">Borrar</button>
         </div>

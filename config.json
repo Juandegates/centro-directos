@@ -74,5 +74,10 @@
   "ia": {
     "mistral": "mistral-small-latest",
     "groq": "qwen/qwen3.8-27b"
+  },
+  "resumen": {
+    "activo": true,
+    "minimoClips": 2,
+    "maximoClips": 6
   }
 }

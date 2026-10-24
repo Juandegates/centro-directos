@@ -220,7 +220,7 @@ export const iasConfiguradas = () => ['gemini', ...Object.keys(PROVEEDORES).filt
 // uso: 'chat' (contestar en vivo: primero la más rápida) o 'fondo' (clips, notas, categoría: primero la de más cupo).
 export async function preguntarIA({ sistema, texto, imagenes = [], buscar = false, uso = 'fondo', solo = null }) {
   const errores = [];
-  const orden = solo ? [solo] : uso === 'chat' ? ['gemini', 'groq', 'mistral'] : ['mistral', 'gemini', 'groq'];
+  const orden = solo ? [solo] : uso === 'chat' ? ['gemini', 'groq', 'mistral'] : ['groq', 'mistral', 'gemini'];
   for (const p of orden) {
     if (p === 'gemini') {
       if (Date.now() < geminiPausadoHasta) continue;
@@ -233,6 +233,8 @@ export async function preguntarIA({ sistema, texto, imagenes = [], buscar = fals
       continue;
     }
     if (!configurado(p) || (pausados.get(p) ?? 0) > Date.now()) continue;
+    // Muchas imágenes (por ejemplo, revisar lo grabado de una pelea): solo a la IA que las aguanta.
+    if (imagenes.length > 5 && imagenes.length > PROVEEDORES[p].maxImagenes) continue;
     try {
       const r = await compatible(p, { sistema, texto, imagenes });
       marcar('ia', 'ok', `Funcionando (${PROVEEDORES[p].nombre})`);

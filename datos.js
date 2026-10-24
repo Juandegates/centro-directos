@@ -43,6 +43,8 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
   let ultimaNota = 0;
   let ultimaRevision = 0;
   let sospechas = 0;
+  let ultimoVisto = '';
+  const confirmados = new Set(); // categorías que tú confirmaste como correctas
   let sinVivoSeguidas = 0;
   let vivoDesde = 0;
 
@@ -77,7 +79,10 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
     if (vivo === estado.enVivo) return;
     estado.enVivo = vivo;
     sinVivoSeguidas = 0;
-    if (vivo) {
+    const yaLlevaba = vivo && estado.inicio && Date.now() - new Date(estado.inicio).getTime() > 4 * 60_000 && memoria.directos.at(-1) && !memoria.directos.at(-1).minutos;
+    if (vivo && yaLlevaba) {
+      vivoDesde = Date.now(); // el Centro se reinició a media transmisión: es el mismo directo
+    } else if (vivo) {
       vivoDesde = Date.now();
       memoria.inicios = [...memoria.inicios, new Date().toISOString()].slice(-60);
       memoria.directos = [...memoria.directos, { inicio: new Date().toISOString(), juego: estado.juego, titulo: estado.titulo }].slice(-30);
@@ -130,18 +135,24 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
     if (!imagenes.length) return;
     ultimaRevision = Date.now();
     try {
+      if (confirmados.has(normal(estado.juego))) return;
       const r = await preguntarIA({
-        sistema: 'Identificas videojuegos a partir de capturas de pantalla. Respondes solo con el nombre oficial del juego en ingles tal como aparece en Twitch, o exactamente NO_SE si no estas seguro.',
+        sistema: 'Identificas videojuegos a partir de capturas de pantalla. Muchos juegos del mismo genero se parecen mucho, asi que eres muy cuidadoso.',
         imagenes,
-        texto: `La categoria actual en Twitch es: "${estado.juego || 'ninguna'}". ¿Que juego se ve en estas imagenes?`,
+        texto: `La categoria actual en Twitch es: "${estado.juego || 'ninguna'}".
+` +
+          'Responde exactamente ES_ESTE si las imagenes PODRIAN ser de ese juego (aunque no estes seguro), o NO_SE si no puedes saberlo. ' +
+          'Solo si estas COMPLETAMENTE seguro de que es OTRO juego (por ejemplo, porque se lee su nombre en pantalla o es inconfundible), responde solo con el nombre oficial de ese otro juego en ingles.',
       });
       const visto = r.replace(/["'.]/g, '').trim();
-      if (!visto || /NO_SE/i.test(visto) || normal(visto).includes(normal(estado.juego)) || normal(estado.juego).includes(normal(visto))) {
+      if (!visto || /ES_ESTE|NO_SE/i.test(visto) || visto.length > 80 || normal(visto).includes(normal(estado.juego)) || normal(estado.juego).includes(normal(visto))) {
         sospechas = 0;
         return;
       }
-      sospechas++;
-      if (sospechas >= 2) {
+      // Tiene que ver el MISMO otro juego 3 veces seguidas (≈30 min) para avisarte.
+      sospechas = normal(visto) === ultimoVisto ? sospechas + 1 : 1;
+      ultimoVisto = normal(visto);
+      if (sospechas >= 3) {
         estado.sugerencia = visto;
         avisar('🎮 ¿Categoría equivocada?', `Parece que juegas ${visto}, pero Twitch dice "${estado.juego || 'sin categoría'}". Toca para corregirlo.`, {
           etiquetas: ['video_game'], abrir: `${urlApp()}#corregir`, clave: 'categoria-' + visto, cadaMinutos: 30,
@@ -170,6 +181,8 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
     refrescar,
     ponerVivo,
     descartarSugerencia: () => { estado.sugerencia = null; sospechas = 0; },
+    // "No, es correcto": no volver a preguntar por esta categoría mientras el Centro esté prendido.
+    confirmarCategoria: () => { confirmados.add(normal(estado.juego)); estado.sugerencia = null; sospechas = 0; log(`✅ Categoría confirmada: ${estado.juego}`); },
     actual: () => ({
       nombre: canal.display_name,
       juego: estado.juego || 'sin juego definido',

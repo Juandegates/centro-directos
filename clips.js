@@ -82,7 +82,8 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     }
   }, 5_000);
 
-  async function crear(motivo, { puntos = null, que = '', saltarEspera = false, segundos = null } = {}) {
+  // rango: { desde, hasta } en ms para armar el clip de un momento ya pasado (por ejemplo, el final de un jefe).
+  async function crear(motivo, { puntos = null, que = '', saltarEspera = false, segundos = null, rango = null, fotosMomento = null } = {}) {
     const c = leerConfig().clips ?? {};
     if (trabajando || !captura.activa()) return null;
     if (Date.now() - ultimoClip < (c.minutosEntreClips ?? 3) * 60_000 && motivo !== 'manual' && !saltarEspera) return null;
@@ -90,19 +91,20 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     ultimoClip = Date.now();
     const id = nuevoId();
     const carpeta = join(CARPETA_CLIPS, id);
-    const fotos = captura.recientes(5);
+    const fotos = fotosMomento?.length ? fotosMomento : captura.recientes(5);
     const chat = mensajes.filter((m) => m.hora > Date.now() - 60_000).map((m) => m.linea).slice(-15);
     log(`🎬 Momento detectado (${motivo}); armando clip…`, { parte: 'clips' });
 
     try {
-      const twitch = await crearClipTwitch().catch((e) => {
+      // El clip de Twitch es de "ahora": no sirve para un momento que ya pasó.
+      const twitch = rango ? null : await crearClipTwitch().catch((e) => {
         log('No pude crear el clip en Twitch: ' + e.message, { parte: 'clips', nivel: 'aviso' });
         return null;
       });
 
       // Esperamos para incluir lo que pasó justo después del momento.
-      await new Promise((r) => setTimeout(r, 15_000));
-      const pedazos = captura.pedazos(segundos ?? c.segundos ?? 40);
+      if (!rango) await new Promise((r) => setTimeout(r, 15_000));
+      const pedazos = rango ? captura.pedazosEntre(rango.desde, rango.hasta) : captura.pedazos(segundos ?? c.segundos ?? 40);
       if (pedazos.length < 2) throw new Error('Todavía no hay suficiente grabación para el clip');
 
       mkdirSync(carpeta, { recursive: true });
@@ -173,7 +175,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
         sistema: `Eres el community manager de ${d.nombre}, streamer mexicano de PS5. Escribes en espanol mexicano, con gancho, sin mentir.`,
         imagenes: fotos,
         texto:
-          `Juego: ${d.juego}. Motivo del clip: ${motivo}.${que ? ` Lo que paso segun la revision: ${que}.` : ''}\nChat en ese momento:\n${chat.join('\n') || '(sin mensajes)'}\n\n` +
+          `Juego: ${d.juego}. Motivo del clip: ${motivo}.${que ? ` LO QUE PASO (dato confirmado; no lo contradigas y no agregues nada que no diga aqui, por ejemplo no digas "al primer intento" ni "lo derrote" si no lo dice): ${que}.` : ''}\nChat en ese momento:\n${chat.join('\n') || '(sin mensajes)'}\n\n` +
           `Notas de la partida: ${d.notasJuego || '(ninguna)'}\n\n` +
           'Las imagenes son del momento del clip (la ultima es la mas reciente). Mira bien que esta pasando: jefe, enemigos, zona, accion, si gano o perdio. ' +
           'El titulo y los textos deben describir ESO en concreto (ej. "Me enfrento al jefe de la catedral", "Casi muero con estos picos"). ' +

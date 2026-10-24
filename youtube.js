@@ -167,3 +167,11 @@ export async function actualizarVideo({ id, titulo, descripcion, etiquetas = [] 
     cuerpo: { id, snippet: { title: titulo.slice(0, 100), description: descripcion.slice(0, 4900), tags: etiquetas.slice(0, 15), categoryId: '20' } },
   });
 }
+
+// Directo de YouTube que sigue activo (para retomarlo si el Centro se reinicia a media transmisión).
+export async function directoActivo() {
+  const r = await api('liveBroadcasts?part=snippet,status&broadcastStatus=active&broadcastType=all&maxResults=5');
+  const b = (r.items ?? []).find((x) => ['live', 'testing', 'ready'].includes(x.status?.lifeCycleStatus));
+  if (!b) return null;
+  return { id: b.id, chatId: b.snippet.liveChatId, inicio: b.snippet.actualStartTime ?? b.snippet.scheduledStartTime, url: `https://youtube.com/watch?v=${b.id}` };
+}

@@ -86,7 +86,7 @@ let ctx = null; // todo lo que existe una vez iniciada la sesión de Twitch
 // ---------- YouTube ----------
 const yt = { directo: null, relevo: null, chatActivo: false, ultimoTitulo: 0, revision: null };
 
-async function iniciarYoutube() {
+async function iniciarYoutube({ reanudar = false } = {}) {
   if (yt.directo) return;
   if (!ajustes().envioYoutube) return marcar('envioYoutube', 'apagado', 'Envío a YouTube apagado desde la app');
   if (!youtube.configurado()) return marcar('youtube', 'apagado', 'Falta configurar Google en claves.txt');
@@ -94,12 +94,15 @@ async function iniciarYoutube() {
   const d = ctx.datos.actual();
   try {
     const stream = await youtube.asegurarStream();
-    yt.directo = await youtube.crearDirecto({
+    // Si el Centro se reinició a media transmisión, retomamos el mismo directo de YouTube.
+    const previo = reanudar ? await youtube.directoActivo().catch(() => null) : null;
+    if (previo) log('🔄 Retomo el mismo directo de YouTube');
+    yt.directo = previo ?? await youtube.crearDirecto({
       titulo: d.titulo || `Jugando ${d.juego} en PS5`,
       descripcion: `🎮 ${d.juego} en vivo desde la PS5.\n\nJuego: ${d.juego}\nHorario: ${d.horario}`,
       streamId: stream.id,
     });
-    marcar('youtube', 'ok', 'Directo creado en YouTube');
+    marcar('youtube', 'ok', previo ? 'Directo de YouTube retomado' : 'Directo creado en YouTube');
     arrancarRelevo(stream.rtmp);
     leerChatYoutube();
     setTimeout(revisarYoutube, 45_000);
@@ -219,9 +222,25 @@ async function sincronizarTituloYoutube(titulo) {
 let inicioDirecto = null;
 
 async function alEmpezar() {
-  inicioDirecto = Date.now();
   const d = ctx.datos.actual();
+  // ¿El directo ya llevaba rato? Entonces el Centro se reinició a media transmisión (actualización o falla):
+  // retomamos todo sin repetir anuncios ni crear otro directo en YouTube.
+  const reanudar = Boolean(d.inicio) && Date.now() - new Date(d.inicio).getTime() > 4 * 60_000;
+  inicioDirecto = reanudar ? new Date(d.inicio).getTime() : Date.now();
   marcar('directo', 'ok', `En vivo: ${d.juego}`);
+  if (reanudar) {
+    log('🔄 El Centro se reinició a media transmisión: retomo todo sin repetir anuncios');
+    ctx.momentos.nuevoDirecto();
+    ctx.captura.iniciar();
+    await iniciarYoutube({ reanudar: true });
+    ctx.crecer.alEmpezar({ reanudar: true }).catch(() => {});
+    setTimeout(() => {
+      const p = Object.fromEntries(verPartes().map((x) => [x.id, x.estado]));
+      const s = (e) => (e === 'ok' ? '✅' : e === 'apagado' ? '⚪' : '⚠️');
+      avisar('🔄 Centro reiniciado, sigues en vivo', `Twitch ✅ · YouTube ${s(p.envioYoutube)} · Bot ${s(p.chatTwitch)} · Vista ${s(p.captura)}`, { etiquetas: ['arrows_counterclockwise'], abrir: urlApp(), clave: 'reanudado', cadaMinutos: 10 });
+    }, 60_000);
+    return;
+  }
   ctx.bots.twitch.nuevoDirecto();
   ctx.bots.youtube.nuevoDirecto();
   ctx.momentos.nuevoDirecto();
@@ -372,6 +391,7 @@ const rutas = {
     log('Título/categoría cambiados desde la app');
     return { ok: true, directo: ctx.datos.actual() };
   },
+  'POST /api/categoria/correcta': () => { necesitaCtx(); ctx.datos.confirmarCategoria(); return { ok: true }; },
   'POST /api/bot': ({ cuerpo }) => {
     guardarAjustes({ botPausado: { ...ajustes().botPausado, [cuerpo.plataforma]: Boolean(cuerpo.pausado) } });
     log(`Bot de ${cuerpo.plataforma} ${cuerpo.pausado ? 'pausado' : 'reanudado'} desde la app`);

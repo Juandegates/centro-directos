@@ -73,3 +73,15 @@ const WIN = (process.env.WINDIR || 'C:\\Windows').replace(/\\/g, '/');
 const LETRAS = [`${WIN}/Fonts/arialbd.ttf`, `${WIN}/Fonts/segoeuib.ttf`, `${WIN}/Fonts/arial.ttf`,
   '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', '/System/Library/Fonts/Supplemental/Arial Bold.ttf'];
 export const letraParaTextos = () => LETRAS.find((f) => existsSync(f)) ?? null;
+
+// Saca una imagen (JPG chiquito) de un pedacito grabado, en el segundo indicado.
+export function cuadroDe(config, ruta, segundo, ancho = 384) {
+  return new Promise((ok, mal) => {
+    const p = spawn(rutaFfmpeg(config), ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, segundo)), '-i', ruta,
+      '-frames:v', '1', '-vf', `scale=${ancho}:-2`, '-q:v', '7', '-f', 'image2pipe', '-c:v', 'mjpeg', 'pipe:1'], { windowsHide: true });
+    const partes = [];
+    p.stdout.on('data', (d) => partes.push(d));
+    p.on('error', mal);
+    p.on('close', (c) => (c === 0 && partes.length ? ok(Buffer.concat(partes)) : mal(new Error('No pude sacar la imagen'))));
+  });
+}

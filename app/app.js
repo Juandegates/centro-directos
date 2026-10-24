@@ -120,8 +120,12 @@ function pintarEstado() {
   const sug = $('#sugerencia');
   sug.hidden = !d?.sugerencia;
   if (d?.sugerencia) {
-    sug.innerHTML = `<span>🎮 Parece que juegas <strong>${esc(d.sugerencia)}</strong>, pero Twitch dice "${esc(d.juego)}".</span><button class="primario">Corregir categoría</button>`;
-    sug.querySelector('button').onclick = () => { $('#campo-categoria').value = d.sugerencia; buscarCategorias(); $('#campo-categoria').focus(); };
+    sug.innerHTML = `<span>🎮 Parece que juegas <strong>${esc(d.sugerencia)}</strong>, pero Twitch dice "${esc(d.juego)}".</span>
+      <div class="fila botones"><button class="primario crece" data-a="corregir">Corregir categoría</button><button class="crece" data-a="ok">No, es correcto</button></div>`;
+    sug.querySelector('[data-a="corregir"]').onclick = () => { $('#campo-categoria').value = d.sugerencia; buscarCategorias(); $('#campo-categoria').focus(); };
+    sug.querySelector('[data-a="ok"]').onclick = async () => {
+      try { await api('/api/categoria/correcta', { cuerpo: {} }); sug.hidden = true; toast('Listo, no te vuelvo a preguntar por este juego'); refrescarEstado(); } catch (e) { toast(e.message); }
+    };
   }
 
   const parte = Object.fromEntries(e.partes.map((p) => [p.id, p]));

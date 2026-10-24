@@ -4,7 +4,7 @@
 import { mkdirSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { lanzarDesdeTwitch } from './herramientas.js';
+import { lanzarDesdeTwitch, cuadroDe } from './herramientas.js';
 import { marcar } from './estado.js';
 
 export const CARPETA = fileURLToPath(new URL('./grabacion/', import.meta.url));
@@ -98,6 +98,32 @@ export function crearCaptura({ canal, leerConfig }) {
       const limite = Date.now() - 15_000;
       return fotos.filter((f) => f.hora >= limite).slice(-cuantas)
         .map((f) => ({ mime: 'image/jpeg', base64: f.jpg.toString('base64') }));
+    },
+    // Pedacitos grabados entre dos momentos (ms), en orden. Cada uno dura ~10 s y termina en su hora de guardado.
+    pedazosEntre(desde, hasta) {
+      return readdirSync(CARPETA)
+        .filter((f) => f.endsWith('.ts'))
+        .map((f) => ({ ruta: join(CARPETA, f), fin: statSync(join(CARPETA, f)).mtimeMs, nombre: f }))
+        .filter((p) => p.fin >= desde && p.fin - 11_000 <= hasta)
+        .sort((a, b) => a.nombre.localeCompare(b.nombre))
+        .map((p) => p.ruta);
+    },
+    // Imágenes de lo ya grabado, una cada `cada` segundos entre dos momentos: [{ hora, mime, base64 }].
+    async cuadrosEntre(desde, hasta, cada = 10) {
+      const lista = readdirSync(CARPETA)
+        .filter((f) => f.endsWith('.ts'))
+        .map((f) => ({ ruta: join(CARPETA, f), fin: statSync(join(CARPETA, f)).mtimeMs }))
+        .sort((a, b) => a.fin - b.fin);
+      const cuadros = [];
+      for (let t = desde; t <= hasta; t += cada * 1000) {
+        const p = lista.find((x) => x.fin >= t && x.fin - 10_000 <= t);
+        if (!p) continue;
+        try {
+          const jpg = await cuadroDe(leerConfig(), p.ruta, (t - (p.fin - 10_000)) / 1000);
+          cuadros.push({ hora: t, mime: 'image/jpeg', base64: jpg.toString('base64') });
+        } catch { /* pedacito en uso o dañado */ }
+      }
+      return cuadros;
     },
     // Pedacitos grabados que cubren los últimos `segundos`, en orden.
     pedazos(segundos) {

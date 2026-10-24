@@ -59,12 +59,13 @@ export function crearCrecer({ canal, datos, leerConfig, avisar, urlApp }) {
   }
 
   // ---------- directo en curso ----------
-  async function alEmpezar() {
+  async function alEmpezar({ reanudar = false } = {}) {
     const d = datos.actual();
-    actual = { inicio: new Date().toISOString(), juego: d.juego, titulo: d.titulo, muestras: [], seguidoresInicio: await anotarSeguidores() };
+    const inicio = reanudar && d.inicio ? new Date(d.inicio).toISOString() : new Date().toISOString();
+    actual = { inicio, juego: d.juego, titulo: d.titulo, muestras: [], seguidoresInicio: await anotarSeguidores() };
     radar = null;
     sugerencia = null;
-    if (cfg().sugerirTitulo) sugerirTituloYEtiquetas().catch(() => {});
+    if (cfg().sugerirTitulo && !reanudar) sugerirTituloYEtiquetas().catch(() => {});
     setTimeout(() => revisarRadar().catch(() => {}), 3 * 60_000);
   }
 

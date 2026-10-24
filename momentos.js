@@ -3,8 +3,10 @@
 // 2) Cuando algo suena más fuerte de lo normal (o cada cierto tiempo), la IA mira la pantalla
 //    y califica el momento del 1 al 10.
 // 3) Los momentos con buena calificación se vuelven clip solos.
-// 4) Peleas de jefe: no se graba el inicio. Se graba el FINAL del primer intento (ganes o pierdas)
-//    y, si perdiste, el Centro sigue atento y graba el final de la pelea en que por fin lo derrotas.
+// 4) Peleas de jefe: se siguen por su BARRA DE VIDA (los jefes con varias fases cambian de sala).
+//    La pelea solo termina con una señal clara (ganaste o perdiste). Entonces se revisa lo ya grabado
+//    para encontrar el momento exacto y se hace el clip del final del primer intento y, si perdiste,
+//    otro cuando por fin lo derrotas.
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CARPETA } from './captura.js';
@@ -16,6 +18,8 @@ const mediana = (xs) => {
   const o = [...xs].sort((a, b) => a - b);
   return o.length ? o[Math.floor(o.length / 2)] : 0;
 };
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+const leerJSON = (r) => JSON.parse(r.slice(r.indexOf('{'), r.lastIndexOf('}') + 1));
 
 export function crearMomentos({ captura, leerConfig, datos, clips }) {
   let medidos = new Set();
@@ -25,57 +29,135 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
   let ultimoClip = 0;
   let clipsHoy = 0;
   let evaluando = false;
-  let jefe = null; // { nombre, intentos, primerClip, noVisto }
+  // Pelea de jefe en curso: { nombre, inicio, ultimoVisto, vida, intentos, primerClip }
+  let jefe = null;
+  // Jefes ya vencidos en este directo (para no volver a seguirlos)
+  let vencidos = new Set();
 
   const cfg = () => ({
     activo: true, dbSobreNormal: 6, puntosParaClip: 7, minutosEntreClips: 8, maxPorDirecto: 6, minutosRevision: 12,
+    segundosRevisionJefe: 120, minutosSinVerJefe: 10,
     ...(leerConfig().momentos ?? {}),
   });
 
-  // Clip del final de una pelea de jefe: ventana más larga (lo que pasó en el último minuto).
-  async function clipJefe(tipo) {
-    const n = jefe?.nombre || 'el jefe';
-    const que = tipo === 'victoria'
-      ? `por fin derroto a ${n}${jefe?.intentos ? ` despues de ${jefe.intentos + 1} intentos` : ' al primer intento'}`
-      : `primer intento contra ${n}: ${tipo === 'derrota' ? 'me derroto' : 'final de la pelea'}`;
-    log(`⚔️ Clip de jefe (${tipo === 'victoria' ? 'victoria' : 'primer intento'}): ${que}`, { parte: 'clips' });
-    const item = await clips.crear(`jefe: ${que}`, { puntos: 10, que, saltarEspera: true, segundos: 70 }).catch(() => null);
-    if (item) clipsHoy++;
-    return Boolean(item);
+  // ---------- revisión de lo ya grabado: ¿cuándo terminó la pelea y quién ganó? ----------
+  async function buscarFinal(tipo) {
+    const ahora = Date.now();
+    // Desde poco antes de la última vez que vimos al jefe (máx. 6 min atrás) hasta ahora.
+    const desde = Math.max(ahora - 6 * 60_000, (jefe.ultimoVisto || ahora) - 90_000);
+    for (let intento = 0; intento < 4; intento++) {
+      const cuadros = await captura.cuadrosEntre(desde, ahora - 5_000, 10);
+      if (cuadros.length < 3) break;
+      try {
+        const r = await preguntarIA({
+          sistema: 'Eres editor de videos de videojuegos. Analizas una secuencia de capturas de un directo para encontrar el momento exacto en que termina una pelea contra un jefe.',
+          imagenes: cuadros,
+          texto:
+            `Juego: ${datos.actual().juego}. Jefe: ${jefe.nombre || '(sin nombre)'}. Te mando ${cuadros.length} imagenes en orden, una cada 10 segundos (la 1 es la mas vieja).\n` +
+            'Ojo: el jefe puede tener varias fases y cambiar de sala; mientras su barra de vida siga en pantalla o no llegue a cero, la pelea NO ha terminado.\n' +
+            `Lo que creemos que paso: ${tipo === 'victoria' ? 'el jugador gano' : 'el jugador perdio'}. Confirmalo o corrigelo.\n` +
+            'Devuelve SOLO un JSON: {"fin": numero de la imagen donde se ve el golpe final al jefe o la muerte del jugador, ' +
+            '"resultado": "victoria" | "derrota" | "no_se", "que": "lo que pasa en 4 a 10 palabras, en espanol"}',
+        });
+        const j = leerJSON(r);
+        const n = Math.max(1, Math.min(cuadros.length, Math.round(Number(j.fin) || cuadros.length)));
+        const resultado = ['victoria', 'derrota'].includes(j.resultado) ? j.resultado : tipo;
+        return { hora: cuadros[n - 1].hora, resultado, que: String(j.que ?? '').slice(0, 80), foto: cuadros[n - 1] };
+      } catch {
+        log('⚔️ La IA está ocupada; vuelvo a revisar lo grabado en 1 minuto', { parte: 'clips' });
+        await esperar(60_000);
+      }
+    }
+    // Sin IA: usamos la última vez que vimos al jefe.
+    return { hora: (jefe.ultimoVisto || ahora) + 15_000, resultado: tipo, que: '', foto: null };
   }
 
-  // Sigue la pelea de jefe con lo que respondió la IA. Devuelve true si la IA está viendo una pelea de jefe.
-  async function seguirJefe(j) {
-    const resultado = String(j.resultado ?? '').toLowerCase();
-    const enPelea = j.jefe === true || j.jefe === 'true';
-    if (!jefe) {
-      if (!enPelea) return false;
-      jefe = { nombre: String(j.nombreJefe ?? '').slice(0, 40), intentos: 0, primerClip: false, noVisto: 0 };
-      log(`⚔️ Empezó una pelea de jefe${jefe.nombre ? `: ${jefe.nombre}` : ''}; grabo el final de la pelea`, { parte: 'clips' });
-      if (resultado !== 'victoria' && resultado !== 'derrota') return true;
+  // Clip del final de una pelea: ~55 s antes del momento final y ~12 s después.
+  async function clipFinal(tipo) {
+    const final = await buscarFinal(tipo);
+    const n = jefe.nombre || 'el jefe';
+    const intento = jefe.intentos + 1;
+    let que;
+    if (final.resultado === 'victoria') {
+      que = intento === 1 ? `derroto a ${n} al primer intento` : `por fin derroto a ${n} (intento ${intento})`;
+    } else {
+      que = `${n} me derroto en el intento ${intento}`;
     }
-    if (j.nombreJefe && !jefe.nombre) jefe.nombre = String(j.nombreJefe).slice(0, 40);
+    if (final.que) que += ` · ${final.que}`;
+    log(`⚔️ Final de la pelea encontrado (${final.resultado}); armando clip: ${que}`, { parte: 'clips' });
+    // Si se está armando otro clip, esperamos un poco (los pedacitos se guardan 20 min).
+    for (let i = 0; i < 12; i++) {
+      const item = await clips.crear(`jefe: ${que}`, {
+        puntos: 10, que, saltarEspera: true,
+        rango: { desde: final.hora - 55_000, hasta: final.hora + 12_000 },
+        fotosMomento: final.foto ? [final.foto] : null,
+      }).catch(() => null);
+      if (item) { clipsHoy++; return final.resultado; }
+      await esperar(10_000);
+    }
+    return final.resultado;
+  }
+
+  // Termina un intento (ganaste o perdiste).
+  async function terminarIntento(tipo) {
+    const j = jefe;
+    const debeGrabar = tipo === 'victoria' || !j.primerClip; // el primer intento siempre; luego solo la victoria
+    let resultado = tipo;
+    if (debeGrabar) resultado = await clipFinal(tipo);
     if (resultado === 'victoria') {
-      await clipJefe('victoria');
+      log(`⚔️ ¡Jefe vencido${j.nombre ? `: ${j.nombre}` : ''}!`, { parte: 'clips' });
+      if (j.nombre) vencidos.add(j.nombre.toLowerCase());
       jefe = null;
+    } else {
+      j.intentos++;
+      j.primerClip = true;
+      j.vida = 100;
+    }
+  }
+
+  // Sigue la pelea con lo que respondió la IA. Devuelve true si la pelea se está siguiendo.
+  async function seguirJefe(j) {
+    const senal = String(j.resultado ?? '').toLowerCase();
+    const barra = j.vidaJefe === null || j.vidaJefe === undefined || j.vidaJefe === '' ? null : Number(j.vidaJefe);
+    const enPelea = j.jefe === true || j.jefe === 'true' || Number.isFinite(barra);
+    const nombre = String(j.nombreJefe ?? '').slice(0, 40);
+    if (!jefe) {
+      if (!enPelea || (nombre && vencidos.has(nombre.toLowerCase()))) return false;
+      jefe = { nombre, inicio: Date.now(), ultimoVisto: Date.now(), vida: Number.isFinite(barra) ? barra : 100, intentos: 0, primerClip: false };
+      log(`⚔️ Empezó una pelea de jefe${nombre ? `: ${nombre}` : ''}; la sigo por su barra de vida`, { parte: 'clips' });
+      if (senal !== 'victoria' && senal !== 'derrota') return true;
+    }
+    if (nombre && !jefe.nombre) jefe.nombre = nombre;
+    // Si la barra del jefe "se llenó" de nuevo, es que perdiste y volviste a intentarlo.
+    if (Number.isFinite(barra) && jefe.vida <= 60 && barra >= jefe.vida + 35 && senal !== 'victoria') {
+      log(`⚔️ La vida del jefe volvió a ${barra}% (estaba en ${jefe.vida}%): cuento un intento perdido`, { parte: 'clips' });
+      await terminarIntento('derrota');
+      if (!jefe) return true;
+      jefe.ultimoVisto = Date.now();
+      jefe.vida = barra;
       return true;
     }
-    if (resultado === 'derrota') {
-      jefe.intentos++;
-      jefe.noVisto = 0;
-      if (!jefe.primerClip) jefe.primerClip = await clipJefe('derrota');
-      return true;
+    if (enPelea) {
+      jefe.ultimoVisto = Date.now();
+      if (Number.isFinite(barra)) jefe.vida = barra;
     }
-    if (enPelea) { jefe.noVisto = 0; return true; }
-    // Ya no se ve la pelea: probablemente acaba de terminar (o reapareciste tras morir).
-    jefe.noVisto++;
-    if (jefe.noVisto === 1 && !jefe.primerClip) jefe.primerClip = await clipJefe('fin');
-    if (jefe.noVisto >= 6) { log('⚔️ Ya no veo la pelea de jefe; dejo de seguirla', { parte: 'clips' }); jefe = null; }
-    return false;
+    if (senal === 'victoria') { await terminarIntento('victoria'); return true; }
+    if (senal === 'derrota') { await terminarIntento('derrota'); return true; }
+    if (!enPelea) {
+      // No se ve la pelea: probablemente cambió de fase o de sala. Seguimos esperando.
+      const minutos = (Date.now() - jefe.ultimoVisto) / 60_000;
+      if (minutos >= cfg().minutosSinVerJefe) {
+        log('⚔️ Hace rato que no veo la pelea de jefe; dejo de seguirla', { parte: 'clips' });
+        jefe = null;
+      }
+      return false;
+    }
+    return true;
   }
 
   async function evaluar(motivo) {
-    if (evaluando || Date.now() - ultimaEvaluacion < (jefe ? 50_000 : 90_000)) return;
+    const c = cfg();
+    if (evaluando || Date.now() - ultimaEvaluacion < (jefe ? c.segundosRevisionJefe * 1000 - 5_000 : 90_000)) return;
     const fotos = captura.recientes(5);
     if (!fotos.length) return;
     evaluando = true;
@@ -89,23 +171,26 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
           `Juego: ${d.juego}. Estas son imagenes de los ultimos segundos del directo (la ultima es la mas reciente). Motivo de la revision: ${motivo}.\n` +
           'Califica del 1 al 10 que tan atractivo seria como clip corto para gente que NO conoce el canal: ' +
           '9-10 = pelea de jefe intensa, victoria o muerte espectacular, algo chistoso o sorprendente; 6-8 = combate con accion, descubrimiento o zona impresionante; ' +
-          '1-5 = menus, mapa, inventario, caminar, pantallas de carga o nada pasando.\n' +
-          (jefe ? `Hace poco habia una pelea contra el jefe ${jefe.nombre || '(sin nombre)'}; fijate si sigue, si gano el jugador o si lo derrotaron.\n` : '') +
+          '1-5 = menus, mapa, inventario, caminar, dialogos, pantallas de carga o nada pasando.\n' +
+          (jefe ? `IMPORTANTE: hay una pelea en curso contra el jefe ${jefe.nombre || '(sin nombre)'} (ultima vida vista: ${jefe.vida}%). Puede tener varias fases y cambiar de sala.\n` : '') +
           'Devuelve SOLO un JSON: {"puntos": numero, "que": "lo que pasa, en 3 a 8 palabras, en espanol", ' +
-          '"jefe": true si en pantalla hay una pelea contra un jefe (barra de vida grande del jefe, arena de jefe) o false, ' +
-          '"nombreJefe": "nombre del jefe si se ve, o vacio", ' +
-          '"resultado": "victoria" si se ve que el jugador acaba de vencer a un jefe, "derrota" si se ve pantalla de muerte o de game over, "pelea" si la pelea sigue, o "nada"}',
+          '"jefe": true si se ve una pelea contra un jefe (barra de vida grande de jefe), si no false, ' +
+          '"nombreJefe": "nombre del jefe si se lee en pantalla, o vacio", ' +
+          '"vidaJefe": porcentaje aproximado de vida que le queda al jefe segun su barra (0 a 100), o null si no se ve su barra, ' +
+          '"resultado": "victoria" SOLO si se ve claramente que el jefe fue vencido (barra en cero, mensaje de victoria, recompensa del jefe o escena de su derrota), ' +
+          '"derrota" SOLO si se ve la pantalla de muerte o de game over del jugador, "pelea" si la pelea sigue, o "nada"}',
       });
-      const j = JSON.parse(r.slice(r.indexOf('{'), r.lastIndexOf('}') + 1));
+      const j = leerJSON(r);
       const puntos = Math.max(1, Math.min(10, Math.round(Number(j.puntos) || 0)));
       const que = String(j.que ?? '').slice(0, 80);
       const m = { hora: Date.now(), puntos, que, motivo, clip: false };
       momentos.push(m);
       if (momentos.length > 200) momentos.shift();
-      log(`🎯 Momento (${motivo}): ${puntos}/10 · ${que}`, { parte: 'clips' });
+      const vida = j.vidaJefe !== null && j.vidaJefe !== undefined && Number.isFinite(Number(j.vidaJefe)) ? ` · jefe ${j.vidaJefe}%` : '';
+      log(`🎯 Momento (${motivo}): ${puntos}/10 · ${que}${vida}`, { parte: 'clips' });
       // Las peleas de jefe se graban al final (ver seguirJefe), no al empezar.
       if (await seguirJefe(j)) return;
-      const c = cfg();
+      if (jefe) return; // a media pelea (cambio de sala) no hacemos clips sueltos
       if (puntos >= c.puntosParaClip && clipsHoy < c.maxPorDirecto && Date.now() - ultimoClip > c.minutosEntreClips * 60_000) {
         ultimoClip = Date.now(); // se aparta de una vez para no lanzar dos clips del mismo momento
         clips.crear(`momento: ${que}`, { puntos, que, saltarEspera: true })
@@ -137,16 +222,16 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
         if (volumenes.length > 60) volumenes.shift();
         if (volumenes.length < 8) continue; // primero aprendemos cómo suena normalmente tu juego
         const sobre = v.media - normal;
-        if (sobre >= c.dbSobreNormal || (v.pico > -1.5 && sobre >= c.dbSobreNormal / 2)) {
+        if (!jefe && (sobre >= c.dbSobreNormal || (v.pico > -1.5 && sobre >= c.dbSobreNormal / 2))) {
           await evaluar(`sonido fuerte (+${sobre.toFixed(1)} dB)`);
         }
       } catch { /* pedacito sin audio o en uso */ }
     }
     if (medidos.size > 2000) medidos = new Set([...medidos].slice(-500));
-    // En plena pelea de jefe revisamos cada minuto para no perdernos el final.
+    // En plena pelea de jefe revisamos cada 2 min (el momento exacto se busca después en lo grabado).
     if (jefe) await evaluar('pelea de jefe');
     // Juegos con sonido parejo: cada tanto revisamos la pantalla aunque no haya picos.
-    if (Date.now() - ultimaEvaluacion > c.minutosRevision * 60_000) await evaluar('revisión periódica');
+    else if (Date.now() - ultimaEvaluacion > c.minutosRevision * 60_000) await evaluar('revisión periódica');
   }
 
   setInterval(() => { revisarAudio().catch(() => {}); }, 10_000);
@@ -158,8 +243,10 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
       clipsHoy = 0;
       ultimoClip = 0;
       jefe = null;
+      vencidos = new Set();
       ultimaEvaluacion = Date.now(); // la primera revisión periódica, a los pocos minutos
     },
     lista: () => momentos,
+    _evaluar: (motivo) => evaluar(motivo), // para pruebas
   };
 }

@@ -279,7 +279,9 @@ async function cargarBandeja(enfocar) {
         <div><strong>🎬 ${esc(i.titulo)}</strong><div class="tenue">${esc(fecha)} · ${esc(i.juego ?? '')} · ${esc(i.motivo ?? '')}${i.puntos ? ` · ${i.puntos}/10` : ''}</div>
           ${i.programado && !hecho ? `<div class="tenue">📅 Toca publicarlo: ${esc(fechaCorta(i.programado))}</div>` : ''}</div>
         <video controls playsinline preload="none" poster="/media/${esc(i.archivos.portada)}" src="/media/${esc(i.archivos.vertical)}"></video>
-        <div class="tenue">Texto para TikTok / Shorts</div><div class="texto">${esc(i.textoTikTok)}</div>
+        ${i.tituloShorts ? `<div class="tenue">Título para Shorts (${i.tituloShorts.length}/100)</div><div class="texto">${esc(i.tituloShorts)}</div>
+        <button data-copiar="${esc(i.tituloShorts)}">Copiar título de Shorts</button>` : ''}
+        <div class="tenue">Texto para TikTok / descripción de Shorts</div><div class="texto">${esc(i.textoTikTok)}</div>
         <div class="acciones">
           <a class="boton primario" href="/media/${esc(i.archivos.vertical)}" download="clip-${esc(i.id)}.mp4">⬇ Video vertical</a>
           <button data-copiar="${esc(i.textoTikTok)}">Copiar texto</button>

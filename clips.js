@@ -2,6 +2,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { correrFfmpeg, letraParaTextos } from './herramientas.js';
+import { recortar } from './promos.js';
 import { preguntarIA } from './ia.js';
 import { marcar, log } from './estado.js';
 import { agregar, nuevoId, CARPETA_CLIPS } from './bandeja.js';
@@ -23,7 +24,7 @@ export function partirGancho(texto, max = 20) {
 }
 
 // Filtro de FFmpeg del video vertical: fondo difuminado, juego al centro con zoom y, si hay letra, el gancho arriba y tu canal abajo.
-export function filtroVertical({ zoom, lineas = [], marca = '', letra = null }) {
+export function filtroVertical({ zoom, lineas = [], marcas = [], letra = null }) {
   const altoJuego = Math.round(1080 / ((16 / 9) * zoom) / 2) * 2;
   const arriba = Math.round((1920 - altoJuego) / 2);
   let f = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5[fondo];' +
@@ -35,9 +36,23 @@ export function filtroVertical({ zoom, lineas = [], marca = '', letra = null }) 
       const y = arriba - 70 - (lineas.length - i) * 110;
       f += `,drawtext=${fuente}:expansion=none:textfile=linea${i + 1}.txt:fontsize=78:fontcolor=white:${caja}:x=(w-text_w)/2:y=${y}`;
     });
-    if (marca) f += `,drawtext=${fuente}:expansion=none:textfile=marca.txt:fontsize=50:fontcolor=white:${caja}:x=(w-text_w)/2:y=${arriba + altoJuego + 90}`;
+    // Tus cuentas abajo del juego, un poco más chicas que el gancho.
+    marcas.forEach((_, i) => {
+      f += `,drawtext=${fuente}:expansion=none:textfile=marca${i + 1}.txt:fontsize=44:fontcolor=white:${caja}:x=(w-text_w)/2:y=${arriba + altoJuego + 80 + i * 92}`;
+    });
   }
   return f + ',format=yuv420p[v]';
+}
+
+// Tus cuentas: Twitch sale del canal; YouTube de config.json → redes.youtube.
+export function lineasCuentas(config, canalLogin) {
+  const yt = String(config.redes?.youtube ?? '').trim();
+  return [canalLogin && `Twitch: ${canalLogin}`, yt && `YouTube: ${yt.startsWith('@') ? yt : '@' + yt}`].filter(Boolean);
+}
+export function lineaCuentas(config, canalLogin) {
+  const yt = String(config.redes?.youtube ?? '').trim();
+  const partes = [canalLogin && `Twitch (${canalLogin})`, yt && `YouTube (${yt.startsWith('@') ? yt : '@' + yt})`].filter(Boolean);
+  return partes.length ? `🎮 En vivo en ${partes.join(' y ')}` : '';
 }
 
 export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar, urlApp, canalLogin = '', alClipListo = () => {} }) {
@@ -105,11 +120,11 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
       const zoom = Math.min(1, Math.max(0.4, Number(c.zoomVertical ?? 0.7)));
       const letra = c.gancho === false ? null : letraParaTextos();
       const lineas = letra ? partirGancho(textos.gancho) : [];
-      const marca = letra && c.marcaCanal !== false && canalLogin ? `twitch.tv/${canalLogin}` : '';
+      const marcas = letra && c.marcaCanal !== false ? lineasCuentas(leerConfig(), canalLogin) : [];
       lineas.forEach((l, i) => writeFileSync(join(carpeta, `linea${i + 1}.txt`), l));
-      if (marca) writeFileSync(join(carpeta, 'marca.txt'), marca);
+      marcas.forEach((m, i) => writeFileSync(join(carpeta, `marca${i + 1}.txt`), m));
       const armarVertical = (conTexto) => correrFfmpeg(config, ['-i', horizontal, '-filter_complex',
-        filtroVertical({ zoom, lineas: conTexto ? lineas : [], marca: conTexto ? marca : '', letra: conTexto ? letra : null }),
+        filtroVertical({ zoom, lineas: conTexto ? lineas : [], marcas: conTexto ? marcas : [], letra: conTexto ? letra : null }),
         '-map', '[v]', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', vertical], { cwd: carpeta });
       // Si escribir el texto falla (letra rara, versión vieja de FFmpeg), igual sale el clip sin texto.
@@ -127,6 +142,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
         juego: datos.actual().juego,
         titulo: textos.titulo,
         textoTikTok: textos.tiktok,
+        tituloShorts: textos.tituloShorts,
         textoX: textos.x,
         twitch,
         archivos: { horizontal: `${id}/horizontal.mp4`, vertical: `${id}/vertical.mp4`, portada: `${id}/portada.jpg` },
@@ -149,7 +165,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     const respaldo = {
       gancho: que || `Mira esto en ${d.juego}`,
       titulo: que || `Momentazo en ${d.juego}`,
-      tiktok: `Momentazo en ${d.juego} 🎮🔥 #${d.juego.replace(/[^a-z0-9]/gi, '')} #PS5 #gaming #twitch`,
+      tiktok: `Momentazo en ${d.juego} 🎮🔥 #${d.juego.replace(/[^a-z0-9]/gi, '')} #PS5 #gaming`,
       x: `Momentazo en ${d.juego} 🎮🔥`,
     };
     try {
@@ -165,15 +181,24 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
           'Devuelve SOLO un JSON valido con estas llaves:\n' +
           '"gancho": frase que va ESCRITA ENCIMA del video en los primeros segundos para que la gente no deslice: max 32 caracteres, pregunta o reaccion en primera persona ("¿Cómo esquivo esto?", "Este jefe casi me mata"), sin hashtags ni emojis,\n' +
           '"titulo": titulo corto con gancho (max 60 caracteres),\n' +
-          '"tiktok": descripcion para TikTok/Shorts con 4 a 6 hashtags relevantes (max 200 caracteres),\n' +
+          '"tituloShorts": titulo para YouTube Shorts, max 85 caracteres, con gancho y el nombre del juego, sin hashtags,\n' +
+          '"tiktok": descripcion para TikTok/Shorts con 4 a 6 hashtags relevantes (max 180 caracteres),\n' +
           '"x": texto para X (max 200 caracteres, sin hashtags de mas).',
       });
       const json = JSON.parse(r.slice(r.indexOf('{'), r.lastIndexOf('}') + 1));
       const gancho = String(json.gancho || respaldo.gancho).replace(/[#\p{Extended_Pictographic}]/gu, '').trim().slice(0, 40);
-      return { gancho, titulo: json.titulo || respaldo.titulo, tiktok: json.tiktok || respaldo.tiktok, x: json.x || respaldo.x };
+      const titulo = json.titulo || respaldo.titulo;
+      return conCuentas({ gancho, titulo, tituloShorts: json.tituloShorts || titulo, tiktok: json.tiktok || respaldo.tiktok, x: json.x || respaldo.x });
     } catch {
-      return respaldo;
+      return conCuentas({ ...respaldo, tituloShorts: respaldo.titulo });
     }
+  }
+
+  // Título de Shorts (máx. 100 con #Shorts) y tus cuentas al final de la descripción, siempre.
+  function conCuentas(t) {
+    const base = recortar(String(t.tituloShorts).replace(/#\S+/g, '').replace(/\s+/g, ' ').trim(), 100 - ' #Shorts'.length);
+    const cuentas = lineaCuentas(leerConfig(), canalLogin);
+    return { ...t, tituloShorts: `${base} #Shorts`, tiktok: cuentas ? `${t.tiktok}\n${cuentas}` : t.tiktok };
   }
 
   return { registrarMensaje, crear };

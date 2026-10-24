@@ -66,5 +66,8 @@
     "reporteSemanal": true,
     "horaReporte": "20:00"
   },
-  "botsIgnorados": []
+  "botsIgnorados": [],
+  "redes": {
+    "youtube": "@JuandeGamer27"
+  }
 }

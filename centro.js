@@ -12,6 +12,7 @@ import { crearMomentos } from './momentos.js';
 import { crearCalendario } from './calendario.js';
 import { crearCrecer, capitulos } from './crecer.js';
 import { crearResumen } from './resumen.js';
+import { crearEditor } from './editor.js';
 import { iniciarServidor } from './servidor.js';
 import { probarTodo } from './diagnostico.js';
 import { revisarVersion, actualizar } from './actualizar.js';
@@ -327,6 +328,7 @@ async function iniciar() {
   ctx.momentos = crearMomentos({ captura: ctx.captura, leerConfig, datos: ctx.datos, clips: ctx.clips });
   ctx.calendario = crearCalendario({ leerConfig, avisar, urlApp, enVivo: () => ctx.datos.actual().enVivo });
   ctx.crecer = crearCrecer({ canal, datos: ctx.datos, leerConfig, avisar, urlApp });
+  ctx.editor = crearEditor({ leerConfig, clips: ctx.clips, avisar, urlApp, canalLogin: canal.login });
   ctx.resumen = crearResumen({ leerConfig, datos: ctx.datos, avisar, urlApp, canalLogin: canal.login, momentos: ctx.momentos });
   ctx.promos = crearPromos({ datos: ctx.datos, avisar, urlApp, urlTwitch: () => `https://twitch.tv/${canal.login}` });
 
@@ -422,6 +424,12 @@ const rutas = {
     ctx.clips.crear('manual');
     return { ok: true, mensaje: 'Armando el clip; te aviso cuando esté listo (tarda como 1 minuto).' };
   },
+  // Subir un video propio (por ejemplo, de la PS App): llega el archivo tal cual, sin JSON.
+  'POST /api/subir': Object.assign(async ({ req, url }) => {
+    necesitaCtx();
+    const id = await ctx.editor.recibir(req, { nota: url.searchParams.get('nota') ?? '', nombre: url.searchParams.get('nombre') ?? '' });
+    return { ok: true, id, mensaje: 'Video recibido. Lo estoy editando; te aviso cuando esté listo (1 a 3 minutos).' };
+  }, { crudo: true }),
   'GET /api/bitacora': () => verBitacora(150),
   // ---------- Crecer ----------
   'GET /api/crecer': () => {

@@ -314,6 +314,42 @@ async function cargarBandeja(enfocar) {
   if (enfocar) document.getElementById('item-' + enfocar)?.scrollIntoView({ behavior: 'smooth' });
 }
 
+// ---------- subir mi video ----------
+$('#subir-video').addEventListener('click', () => {
+  const archivo = $('#archivo-video').files?.[0];
+  const msg = $('#subida-mensaje');
+  if (!archivo) { msg.textContent = 'Primero elige un video.'; return; }
+  const btn = $('#subir-video');
+  const barra = $('#barra-subida');
+  btn.disabled = true;
+  barra.hidden = false;
+  msg.textContent = `Subiendo ${(archivo.size / 1024 ** 2).toFixed(0)} MB…`;
+  // XMLHttpRequest para poder mostrar el avance de la subida.
+  const xhr = new XMLHttpRequest();
+  const q = new URLSearchParams({ nota: $('#nota-video').value.trim(), nombre: archivo.name });
+  xhr.open('POST', '/api/subir?' + q);
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round((e.loaded / e.total) * 100);
+    barra.querySelector('span').style.width = pct + '%';
+    msg.textContent = `Subiendo… ${pct}%`;
+  };
+  xhr.onload = () => {
+    btn.disabled = false;
+    let r = {};
+    try { r = JSON.parse(xhr.responseText); } catch { /* respuesta rara */ }
+    if (xhr.status === 401) { mostrarPin(); return; }
+    if (xhr.status >= 300) { msg.textContent = '❌ ' + (r.error ?? 'No se pudo subir'); return; }
+    msg.textContent = '✅ ' + r.mensaje;
+    $('#archivo-video').value = '';
+    $('#nota-video').value = '';
+    setTimeout(() => { barra.hidden = true; }, 1500);
+  };
+  xhr.onerror = () => { btn.disabled = false; msg.textContent = '❌ Se cortó la subida. Revisa que Tailscale esté conectado e inténtalo otra vez.'; };
+  xhr.send(archivo);
+});
+
 // ---------- crecer ----------
 let crecer = null;
 const fechaCorta = (iso) => new Date(iso).toLocaleString('es-MX', { weekday: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });

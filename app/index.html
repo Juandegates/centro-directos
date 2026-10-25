@@ -98,6 +98,17 @@
 
     <!-- PUBLICAR -->
     <section id="publicar" class="vista" hidden>
+      <article class="tarjeta">
+        <h2>📤 Subir mi video</h2>
+        <p class="tenue">Elige un video de tu galería (por ejemplo, uno que bajaste de la PS5 con la PS App). Lo dejo en vertical con frase, tus cuentas y sus textos.</p>
+        <label for="archivo-video">Video</label>
+        <input id="archivo-video" type="file" accept="video/*">
+        <label for="nota-video">¿Qué pasa en el video? (opcional, ayuda a que los textos atinen)</label>
+        <input id="nota-video" maxlength="200" placeholder="Ej. le gano a Talos con 1 de vida">
+        <button id="subir-video" class="primario ancho">Subir y editar</button>
+        <div id="barra-subida" class="barra" hidden><span style="width:0%"></span></div>
+        <p id="subida-mensaje" class="tenue" role="status"></p>
+      </article>
       <p class="tenue">Clips y posts que preparó el Centro. Publica con un toque y márcalos como hechos.</p>
       <div id="bandeja"></div>
     </section>

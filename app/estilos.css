@@ -118,3 +118,5 @@ summary { cursor: pointer; font-weight: 600; min-height: 28px; }
 .etiquetas { display: flex; flex-wrap: wrap; gap: 6px; }
 .etiquetas span { font-size: 12px; border: 1px solid var(--borde2); border-radius: 999px; padding: 2px 8px; color: var(--tenue); }
 #form-tiktok input { flex: 1; }
+
+#archivo-video { padding: 10px 12px; min-height: 48px; }

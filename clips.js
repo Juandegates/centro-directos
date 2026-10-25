@@ -24,21 +24,24 @@ export function partirGancho(texto, max = 20) {
 }
 
 // Filtro de FFmpeg del video vertical: fondo difuminado, juego al centro con zoom y, si hay letra, el gancho arriba y tu canal abajo.
-export function filtroVertical({ zoom, lineas = [], marcas = [], letra = null }) {
-  const altoJuego = Math.round(1080 / ((16 / 9) * zoom) / 2) * 2;
+// yaVertical: el video ya viene vertical (por ejemplo, uno que subiste): solo se ajusta y se le escribe encima.
+export function filtroVertical({ zoom, lineas = [], marcas = [], letra = null, yaVertical = false }) {
+  const altoJuego = yaVertical ? 1440 : Math.round(1080 / ((16 / 9) * zoom) / 2) * 2;
   const arriba = Math.round((1920 - altoJuego) / 2);
-  let f = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5[fondo];' +
-    `[0:v]crop=trunc(iw*${zoom}/2)*2:ih,scale=1080:-2[frente];[fondo][frente]overlay=(W-w)/2:(H-h)/2`;
+  let f = yaVertical
+    ? '[0:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black'
+    : '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:5[fondo];' +
+      `[0:v]crop=trunc(iw*${zoom}/2)*2:ih,scale=1080:-2[frente];[fondo][frente]overlay=(W-w)/2:(H-h)/2`;
   if (letra) {
     const fuente = `fontfile='${letra.replace(/\\/g, '/').replace(/:/g, '\\:')}'`;
     const caja = 'box=1:boxcolor=black@0.55:boxborderw=22';
     lineas.forEach((_, i) => {
-      const y = arriba - 70 - (lineas.length - i) * 110;
+      const y = yaVertical ? 140 + i * 110 : arriba - 70 - (lineas.length - i) * 110; // ya vertical: arriba, sobre el video
       f += `,drawtext=${fuente}:expansion=none:textfile=linea${i + 1}.txt:fontsize=78:fontcolor=white:${caja}:x=(w-text_w)/2:y=${y}`;
     });
     // Tus cuentas abajo del juego, un poco más chicas que el gancho.
     marcas.forEach((_, i) => {
-      f += `,drawtext=${fuente}:expansion=none:textfile=marca${i + 1}.txt:fontsize=44:fontcolor=white:${caja}:x=(w-text_w)/2:y=${arriba + altoJuego + 80 + i * 92}`;
+      f += `,drawtext=${fuente}:expansion=none:textfile=marca${i + 1}.txt:fontsize=44:fontcolor=white:${caja}:x=(w-text_w)/2:y=${yaVertical ? 1920 - 300 + i * 92 : arriba + altoJuego + 80 + i * 92}`;
     });
   }
   return f + ',format=yuv420p[v]';
@@ -163,7 +166,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     }
   }
 
-  async function escribirTextos({ fotos, chat, motivo, que, d }) {
+  async function escribirTextos({ fotos, chat, motivo, que, d, uso = 'fondo' }) {
     const respaldo = {
       gancho: que || `Mira esto en ${d.juego}`,
       titulo: que || `Momentazo en ${d.juego}`,
@@ -172,6 +175,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     };
     try {
       const r = await preguntarIA({
+        uso,
         sistema: `Eres el community manager de ${d.nombre}, streamer mexicano de PS5. Escribes en espanol mexicano, con gancho, sin mentir.`,
         imagenes: fotos,
         texto:
@@ -203,5 +207,8 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     return { ...t, tituloShorts: `${base} #Shorts`, tiktok: cuentas ? `${t.tiktok}\n${cuentas}` : t.tiktok };
   }
 
-  return { registrarMensaje, crear };
+  // Textos para un video que subiste tú (las imágenes van repartidas a lo largo del video).
+  const escribir = ({ fotos, que }) => escribirTextos({ fotos, chat: [], motivo: 'video que el streamer grabo en su PS5 y eligio publicar', que, d: datos.actual(), uso: 'chat' });
+
+  return { registrarMensaje, crear, escribir };
 }

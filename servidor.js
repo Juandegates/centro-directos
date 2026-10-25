@@ -88,7 +88,8 @@ export function iniciarServidor({ pin, rutas, paginasLocales }) {
           return metodo === req.method && (patron === url.pathname || (patron.endsWith('*') && url.pathname.startsWith(patron.slice(0, -1))));
         });
         if (!ruta) return json(404, { error: 'No existe' });
-        const cuerpo = req.method === 'POST' ? await leerCuerpo(req) : {};
+        // Rutas "crudas" (como subir un video) leen el archivo ellas mismas, sin pasar por JSON.
+        const cuerpo = req.method === 'POST' && !ruta[1].crudo ? await leerCuerpo(req) : {};
         const respuesta = await ruta[1]({ req, url, cuerpo, res });
         if (respuesta === undefined) return; // la ruta ya respondió
         if (typeof respuesta === 'string') {
@@ -109,6 +110,7 @@ export function iniciarServidor({ pin, rutas, paginasLocales }) {
     }
   });
 
+  servidor.requestTimeout = 30 * 60_000; // subir un video grande desde el celular puede tardar
   servidor.on('error', (e) => {
     if (e.code === 'EADDRINUSE') {
       console.log('\n❌ El Centro ya está abierto en otra ventana (puerto 3000 ocupado). Cierra la otra ventana.\n');

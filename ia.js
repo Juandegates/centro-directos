@@ -174,7 +174,7 @@ const PROVEEDORES = {
     clave: () => process.env.GROQ_API_KEY,
     url: 'https://api.groq.com/openai/v1/chat/completions',
     modelo: () => configIA().ia?.groq ?? 'qwen/qwen3.8-27b',
-    maxImagenes: 3,
+    maxImagenes: 1, // cada imagen le cuenta mucho a su límite por minuto: mandamos solo la más reciente
     imagen: (i) => ({ type: 'image_url', image_url: { url: `data:${i.mime};base64,${i.base64}` } }),
   },
 };
@@ -241,8 +241,12 @@ export async function preguntarIA({ sistema, texto, imagenes = [], buscar = fals
       return r;
     } catch (e) {
       errores.push(e.name === 'TimeoutError' ? `${PROVEEDORES[p].nombre} tardó demasiado` : e.message);
-      // Límite alcanzado: esa IA descansa 30 min. Otras fallas: 2 min.
-      pausados.set(p, Date.now() + (e.status === 429 ? 30 : 2) * 60_000);
+      // Límite del día: descansa 30 min. Límite por minuto: 1 min. Petición muy grande: no la castigamos.
+      const msg = String(e.message);
+      const minutos = e.status === 429 && /too large/i.test(msg) ? 0
+        : e.status === 429 && /per day|\(TPD\)|\(RPD\)|daily/i.test(msg) ? 30
+          : e.status === 429 ? 1 : 2;
+      if (minutos) pausados.set(p, Date.now() + minutos * 60_000);
       avisos(`IA: ${errores.at(-1).slice(0, 120)}; pruebo otra…`);
     }
   }

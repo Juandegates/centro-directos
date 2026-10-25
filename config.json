@@ -55,7 +55,9 @@
     "minutosEntreClips": 8,
     "maxPorDirecto": 6,
     "minutosRevision": 12,
-    "minutosMejorMomento": 30
+    "minutosMejorMomento": 30,
+    "minutosSinVerJefe": 20,
+    "segundosRevisionJefe": 120
   },
   "publicar": {
     "hora": "18:00",

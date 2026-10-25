@@ -55,16 +55,23 @@ export function crearResumen({ leerConfig, datos, avisar, urlApp, canalLogin, mo
     // Textos primero: el gancho va escrito encima del video vertical.
     const d = datos.actual();
     const lista = elegidas.map((p) => p.que).filter(Boolean).join('; ');
+    const fuerte = momentos.destacados?.() ?? [];
     let textos = { gancho: 'Lo mejor del directo de hoy', titulo: `Lo mejor del directo: ${d.juego}`, tituloShorts: `Lo mejor del directo de ${d.juego}`, tiktok: `Lo mejor del directo de hoy en ${d.juego} 🎮 #PS5 #gaming` };
+    if (fuerte.length) { // sin IA, al menos el título dice lo más fuerte
+      const f = fuerte.at(-1).charAt(0).toUpperCase() + fuerte.at(-1).slice(1);
+      textos = { ...textos, gancho: recortar(f, 40), titulo: recortar(f, 60), tituloShorts: `${recortar(f, 60)} en ${d.juego}` };
+    }
     try {
       const r = await preguntarIA({
         sistema: `Eres el community manager de ${d.nombre}, streamer mexicano de PS5. Escribes en espanol mexicano, con gancho, sin mentir.`,
         texto: `Directo de ${minutos} min jugando ${d.juego}. Momentos del video resumen, en orden: ${lista || '(sin descripcion)'}.\n` +
-          'No inventes nada que no este en esos momentos. Devuelve SOLO un JSON: {"gancho": "frase para escribir encima del video, max 32 caracteres, sin hashtags ni emojis", ' +
-          '"tituloShorts": "max 85 caracteres, sin hashtags", "tiktok": "descripcion con 4 a 6 hashtags, max 180 caracteres"}',
+          (fuerte.length ? `LO MAS FUERTE DEL DIRECTO (usalo como gancho principal): ${fuerte.join('; ')}.\n` : '') +
+          'Los titulos deben decir lo concreto y mas llamativo que paso (un jefe vencido, una pelea larga, una muerte epica), no frases genericas como "lo mejor del directo". ' +
+          'No inventes nada que no este en esos datos. Devuelve SOLO un JSON: {"gancho": "frase para escribir encima del video, max 32 caracteres, sin hashtags ni emojis", ' +
+          '"titulo": "titulo con gancho, max 60 caracteres", "tituloShorts": "max 85 caracteres, sin hashtags", "tiktok": "descripcion con 4 a 6 hashtags, max 180 caracteres"}',
       });
       const j = JSON.parse(r.slice(r.indexOf('{'), r.lastIndexOf('}') + 1));
-      textos = { ...textos, gancho: j.gancho || textos.gancho, tituloShorts: j.tituloShorts || textos.tituloShorts, tiktok: j.tiktok || textos.tiktok };
+      textos = { ...textos, gancho: j.gancho || textos.gancho, titulo: j.titulo || textos.titulo, tituloShorts: j.tituloShorts || textos.tituloShorts, tiktok: j.tiktok || textos.tiktok };
     } catch { /* usamos los textos de respaldo */ }
 
     await correrFfmpeg(config, [...argsUnir(elegidas, cada), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22',

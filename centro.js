@@ -427,9 +427,14 @@ const rutas = {
   // Subir un video propio (por ejemplo, de la PS App): llega el archivo tal cual, sin JSON.
   'POST /api/subir': Object.assign(async ({ req, url }) => {
     necesitaCtx();
-    const id = await ctx.editor.recibir(req, { nota: url.searchParams.get('nota') ?? '', nombre: url.searchParams.get('nombre') ?? '' });
+    const id = await ctx.editor.recibir(req, { nota: url.searchParams.get('nota') ?? '', nombre: url.searchParams.get('nombre') ?? '', frase: url.searchParams.get('frase') ?? '' });
     return { ok: true, id, mensaje: 'Video recibido. Lo estoy editando; te aviso cuando esté listo (1 a 3 minutos).' };
   }, { crudo: true }),
+  'POST /api/clip/frase': async ({ cuerpo }) => {
+    necesitaCtx();
+    await ctx.editor.cambiarFrase(String(cuerpo.id ?? ''), String(cuerpo.frase ?? ''));
+    return { ok: true, mensaje: cuerpo.frase ? 'Poniendo tu frase; te aviso cuando esté (1 a 2 min).' : 'Pidiendo otra frase a la IA; te aviso cuando esté (1 a 2 min).' };
+  },
   'GET /api/bitacora': () => verBitacora(150),
   // ---------- Crecer ----------
   'GET /api/crecer': () => {

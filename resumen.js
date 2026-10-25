@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { correrFfmpeg, letraParaTextos } from './herramientas.js';
 import { preguntarIA } from './ia.js';
 import { recortar } from './promos.js';
-import { lineaCuentas, lineasCuentas, filtroVertical, partirGancho } from './clips.js';
+import { lineaCuentas, lineasCuentas, filtroVertical, partirGancho, instruccionNoRepetir } from './clips.js';
 import { agregar, nuevoId, CARPETA_CLIPS } from './bandeja.js';
 import { log } from './estado.js';
 
@@ -67,6 +67,7 @@ export function crearResumen({ leerConfig, datos, avisar, urlApp, canalLogin, mo
         texto: `Directo de ${minutos} min jugando ${d.juego}. Momentos del video resumen, en orden: ${lista || '(sin descripcion)'}.\n` +
           (fuerte.length ? `LO MAS FUERTE DEL DIRECTO (usalo como gancho principal): ${fuerte.join('; ')}.\n` : '') +
           'Los titulos deben decir lo concreto y mas llamativo que paso (un jefe vencido, una pelea larga, una muerte epica), no frases genericas como "lo mejor del directo". ' +
+          instruccionNoRepetir() +
           'No inventes nada que no este en esos datos. Devuelve SOLO un JSON: {"gancho": "frase para escribir encima del video, max 32 caracteres, sin hashtags ni emojis", ' +
           '"titulo": "titulo con gancho, max 60 caracteres", "tituloShorts": "max 85 caracteres, sin hashtags", "tiktok": "descripcion con 4 a 6 hashtags, max 180 caracteres"}',
       });

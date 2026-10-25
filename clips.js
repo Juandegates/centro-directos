@@ -5,7 +5,17 @@ import { correrFfmpeg, letraParaTextos } from './herramientas.js';
 import { recortar } from './promos.js';
 import { preguntarIA } from './ia.js';
 import { marcar, log } from './estado.js';
-import { agregar, nuevoId, CARPETA_CLIPS } from './bandeja.js';
+import { agregar, nuevoId, lista, CARPETA_CLIPS } from './bandeja.js';
+
+// Frases que ya salieron en tus últimos videos: la IA no debe repetirlas ni hacer otras parecidas.
+export const frasesRecientes = (n = 20) => lista().map((i) => i.gancho).filter(Boolean).slice(0, n);
+export function instruccionNoRepetir() {
+  const f = frasesRecientes();
+  return f.length
+    ? `FRASES QUE YA USASTE EN OTROS VIDEOS (prohibido repetirlas o hacer una parecida, por ejemplo con la misma estructura "¿Sobrevivire a...?" o "¿Como le gano a...?"): ${f.map((x) => `"${x}"`).join(', ')}.\n` +
+      'Varia el estilo: puede ser una pregunta, una reaccion, un dato curioso, un reto para quien lo ve o una exageracion graciosa.\n'
+    : '';
+}
 
 const REACCIONES = /(ja){2,}|j[aeo]j[aeo]|xd|lol|lmao|no+o+|wo+w|gg|clip|que paso|qu[eé] fue eso|nooo|alv|uff|omg|bruh|😂|🤣|😱|🔥/i;
 
@@ -184,6 +194,7 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
           'Las imagenes son del momento del clip (la ultima es la mas reciente). Mira bien que esta pasando: jefe, enemigos, zona, accion, si gano o perdio. ' +
           'El titulo y los textos deben describir ESO en concreto (ej. "Me enfrento al jefe de la catedral", "Casi muero con estos picos"). ' +
           'Prohibido usar frases genericas como "paso perfecto", "momentazo", "epico" o "no te lo pierdas" si no dicen que paso. No inventes lo que no se ve.\n' +
+          instruccionNoRepetir() +
           'Devuelve SOLO un JSON valido con estas llaves:\n' +
           '"gancho": frase que va ESCRITA ENCIMA del video en los primeros segundos para que la gente no deslice: max 32 caracteres, pregunta o reaccion en primera persona ("¿Cómo esquivo esto?", "Este jefe casi me mata"), sin hashtags ni emojis,\n' +
           '"titulo": titulo corto con gancho (max 60 caracteres),\n' +
@@ -207,8 +218,22 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
     return { ...t, tituloShorts: `${base} #Shorts`, tiktok: cuentas ? `${t.tiktok}\n${cuentas}` : t.tiktok };
   }
 
+  // Solo una frase nueva para un video ya hecho (botón "Cambiar frase").
+  async function fraseNueva({ item, fotos = [] }) {
+    const d = datos.actual();
+    const r = await preguntarIA({
+      uso: 'chat',
+      sistema: `Eres el community manager de ${d.nombre}, streamer mexicano de PS5. Escribes en espanol mexicano, con gancho, sin mentir.`,
+      imagenes: fotos,
+      texto: `Video: "${item.titulo}". ${item.motivo ? `Lo que pasa: ${item.motivo}.` : ''} Frase actual que NO le gusto al streamer: "${item.gancho ?? ''}".\n` +
+        instruccionNoRepetir() +
+        'Escribe UNA frase nueva para ir ESCRITA ENCIMA del video en los primeros segundos: max 32 caracteres, en primera persona, sin hashtags ni emojis, distinta a todas las anteriores. Responde solo con la frase.',
+    });
+    return r.replace(/["#\p{Extended_Pictographic}]/gu, '').trim().slice(0, 40);
+  }
+
   // Textos para un video que subiste tú (las imágenes van repartidas a lo largo del video).
   const escribir = ({ fotos, que }) => escribirTextos({ fotos, chat: [], motivo: 'video que el streamer grabo en su PS5 y eligio publicar', que, d: datos.actual(), uso: 'chat' });
 
-  return { registrarMensaje, crear, escribir };
+  return { registrarMensaje, crear, escribir, fraseNueva };
 }

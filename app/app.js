@@ -274,6 +274,9 @@ async function cargarBandeja(enfocar) {
   cb.textContent = pendientes;
   if (enfocar === undefined && $('#publicar').hidden) return;
   const cont = $('#bandeja');
+  // No redibujar mientras escribes una frase (se perdería lo escrito); salvo que algo se esté rehaciendo.
+  const escribiendo = cont.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+  if (enfocar === null && (escribiendo || (cont.querySelector('details.frase[open]') && !items.some((x) => x.rehaciendo)))) return;
   if (!items.length) { cont.innerHTML = '<p class="tenue centro">Todavía no hay nada. Los clips y anuncios aparecen solos durante tus directos.</p>'; return; }
   cont.innerHTML = items.map((i) => {
     const hecho = i.publicado?.x || i.publicado?.tiktok || i.publicado?.youtube;
@@ -282,12 +285,17 @@ async function cargarBandeja(enfocar) {
       return `<article class="item ${hecho ? 'hecho' : ''}" id="item-${esc(i.id)}">
         <div><strong>${i.resumen ? '🎞️' : '🎬'} ${esc(i.titulo)}</strong><div class="tenue">${esc(fecha)} · ${esc(i.juego ?? '')} · ${esc(i.motivo ?? '')}${i.puntos ? ` · ${i.puntos}/10` : ''}</div>
           ${i.programado && !hecho ? `<div class="tenue">📅 Toca publicarlo: ${esc(fechaCorta(i.programado))}</div>` : ''}</div>
-        <video controls playsinline preload="none" poster="/media/${esc(i.archivos.portada)}" src="/media/${esc(i.archivos.vertical)}"></video>
+        <video controls playsinline preload="none" poster="/media/${esc(i.archivos.portada)}" src="/media/${esc(i.archivos.vertical)}?v=${esc(i.editado ?? '')}"></video>
+        ${i.archivos.horizontal ? `<details class="frase">
+          <summary>${i.rehaciendo ? '⏳ Rehaciendo el video con la frase nueva…' : `✏️ Cambiar frase${i.gancho ? `: “${esc(i.gancho)}”` : ''}`}</summary>
+          <input data-frase-texto="${esc(i.id)}" maxlength="40" placeholder="Escribe tu frase (o deja vacío)">
+          <div class="fila botones"><button class="crece" data-frase-mia="${esc(i.id)}">Usar mi frase</button><button class="crece" data-frase-ia="${esc(i.id)}">Otra de la IA</button></div>
+        </details>` : ''}
         ${i.tituloShorts ? `<div class="tenue">Título para Shorts (${i.tituloShorts.length}/100)</div><div class="texto">${esc(i.tituloShorts)}</div>
         <button data-copiar="${esc(i.tituloShorts)}">Copiar título de Shorts</button>` : ''}
         <div class="tenue">Texto para TikTok / descripción de Shorts</div><div class="texto">${esc(i.textoTikTok)}</div>
         <div class="acciones">
-          <a class="boton primario" href="/media/${esc(i.archivos.vertical)}" download="clip-${esc(i.id)}.mp4">⬇ Video vertical</a>
+          <a class="boton primario" href="/media/${esc(i.archivos.vertical)}?v=${esc(i.editado ?? '')}" download="clip-${esc(i.id)}.mp4">⬇ Video vertical</a>
           <button data-copiar="${esc(i.textoTikTok)}">Copiar texto</button>
           <a class="boton" href="${esc(urlX(i.textoX))}" target="_blank" rel="noopener">Publicar en X</a>
           ${i.archivos.horizontal ? `<a class="boton" href="/media/${esc(i.archivos.horizontal)}" download="clip-${esc(i.id)}-horizontal.mp4">⬇ Horizontal</a>` : ''}
@@ -309,6 +317,17 @@ async function cargarBandeja(enfocar) {
     </article>`;
   }).join('');
   cont.querySelectorAll('[data-copiar]').forEach((b) => { b.onclick = async () => toast((await copiar(b.dataset.copiar)) ? 'Texto copiado' : 'No pude copiar; mantén presionado el texto'); });
+  const cambiarFrase = async (id, frase) => {
+    try { const r = await api('/api/clip/frase', { cuerpo: { id, frase } }); toast(r.mensaje); cargarBandeja(null); } catch (e) { toast(e.message); }
+  };
+  cont.querySelectorAll('[data-frase-mia]').forEach((b) => {
+    b.onclick = () => {
+      const t = cont.querySelector(`[data-frase-texto="${b.dataset.fraseMia}"]`).value.trim();
+      if (!t) { toast('Escribe tu frase primero (o toca "Otra de la IA")'); return; }
+      cambiarFrase(b.dataset.fraseMia, t);
+    };
+  });
+  cont.querySelectorAll('[data-frase-ia]').forEach((b) => { b.onclick = () => cambiarFrase(b.dataset.fraseIa, ''); });
   cont.querySelectorAll('[data-borrar]').forEach((b) => { b.onclick = async () => { await api('/api/bandeja/' + b.dataset.borrar, { cuerpo: { borrar: true } }); cargarBandeja(null); }; });
   cont.querySelectorAll('[data-marcar]').forEach((c) => { c.onchange = async () => { await api('/api/bandeja/' + c.dataset.marcar, { cuerpo: { publicado: { [c.dataset.plat]: c.checked } } }); cargarBandeja(null); }; });
   if (enfocar) document.getElementById('item-' + enfocar)?.scrollIntoView({ behavior: 'smooth' });
@@ -326,7 +345,7 @@ $('#subir-video').addEventListener('click', () => {
   msg.textContent = `Subiendo ${(archivo.size / 1024 ** 2).toFixed(0)} MB…`;
   // XMLHttpRequest para poder mostrar el avance de la subida.
   const xhr = new XMLHttpRequest();
-  const q = new URLSearchParams({ nota: $('#nota-video').value.trim(), nombre: archivo.name });
+  const q = new URLSearchParams({ nota: $('#nota-video').value.trim(), frase: $('#frase-video').value.trim(), nombre: archivo.name });
   xhr.open('POST', '/api/subir?' + q);
   xhr.setRequestHeader('Content-Type', 'application/octet-stream');
   xhr.upload.onprogress = (e) => {
@@ -344,6 +363,7 @@ $('#subir-video').addEventListener('click', () => {
     msg.textContent = '✅ ' + r.mensaje;
     $('#archivo-video').value = '';
     $('#nota-video').value = '';
+    $('#frase-video').value = '';
     setTimeout(() => { barra.hidden = true; }, 1500);
   };
   xhr.onerror = () => { btn.disabled = false; msg.textContent = '❌ Se cortó la subida. Revisa que Tailscale esté conectado e inténtalo otra vez.'; };

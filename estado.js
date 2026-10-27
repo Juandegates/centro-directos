@@ -13,7 +13,7 @@ export const PARTES = {
   youtube: 'Cuenta de YouTube',
   envioYoutube: 'Envío a YouTube',
   chatYoutube: 'Chat de YouTube',
-  ia: 'IA en la nube (Gemini, Mistral, Groq)',
+  ia: 'IA en la nube (Gemini y Groq)',
   iaLocal: 'IA de respaldo (PC)',
   captura: 'Vista de pantalla',
   clips: 'Clips',

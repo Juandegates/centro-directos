@@ -41,6 +41,12 @@ try {
     writeFileSync(ruta, JSON.stringify(c, null, 2) + '\n');
     guardarAjustes({ migraciones: [...hechas, 'animar-20'] });
   }
+  if (!hechas.includes('mejor-7')) {
+    // El "mejor momento del rato" ahora pide al menos 7/10 (antes 5): menos clips flojos de pura exploración.
+    if (c.momentos && (c.momentos.minimoMejorMomento ?? 5) === 5) c.momentos.minimoMejorMomento = 7;
+    writeFileSync(ruta, JSON.stringify(c, null, 2) + '\n');
+    guardarAjustes({ migraciones: [...(ajustes().migraciones ?? hechas), 'mejor-7'] });
+  }
 } catch (e) { log('No pude actualizar config.json: ' + e.message, { nivel: 'aviso' }); }
 
 for (const k of ['GEMINI_API_KEY', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'TWITCH_CANAL']) {

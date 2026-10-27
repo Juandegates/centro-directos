@@ -1,6 +1,6 @@
 {
   "name": "centro-directos",
-  "version": "3.9.0",
+  "version": "4.0.0",
   "description": "Centro de Directos: todo automático para tus directos de PS5",
   "type": "module",
   "private": true,

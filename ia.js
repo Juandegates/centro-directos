@@ -1,4 +1,4 @@
-// IA: varias IAs gratis en la nube, cada una con su propio cupo (Gemini, Mistral y Groq), y la IA de tu PC
+// IA: varias IAs gratis en la nube, cada una con su propio cupo (Gemini y Groq), y la IA de tu PC
 // (Ollama) como último respaldo. Si una se satura o llega a su límite, el Centro pasa a la siguiente.
 // Las respuestas al chat usan primero la más rápida; las tareas de fondo (clips, notas, categoría)
 // usan primero la de cupo más grande, para que la rápida no se gaste.
@@ -165,7 +165,7 @@ const PROVEEDORES = {
     nombre: 'Mistral',
     clave: () => process.env.MISTRAL_API_KEY,
     url: 'https://api.mistral.ai/v1/chat/completions',
-    modelo: () => configIA().ia?.mistral ?? 'mistral-small-latest',
+    modelos: () => [configIA().ia?.mistral ?? 'mistral-small-latest'],
     maxImagenes: 8,
     imagen: (i) => ({ type: 'image_url', image_url: `data:${i.mime};base64,${i.base64}` }),
   },
@@ -173,7 +173,14 @@ const PROVEEDORES = {
     nombre: 'Groq',
     clave: () => process.env.GROQ_API_KEY,
     url: 'https://api.groq.com/openai/v1/chat/completions',
-    modelo: () => configIA().ia?.groq ?? 'qwen/qwen3.8-27b',
+    // Groq da un cupo diario POR MODELO: lo que no lleva imágenes (chat, notas, textos) se va a modelos
+    // de solo texto, y así el modelo que ve imágenes guarda su cupo para revisar la pantalla.
+    modelos: (conImagenes) => {
+      const vision = configIA().ia?.groq ?? 'qwen/qwen3.8-27b';
+      if (conImagenes) return [vision];
+      return [...new Set([...(configIA().ia?.groqTexto ?? ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']), vision])];
+    },
+    extra: (modelo) => (/gpt-oss/.test(modelo) ? { reasoning_effort: 'low' } : {}),
     maxImagenes: 1, // cada imagen le cuenta mucho a su límite por minuto: mandamos solo la más reciente
     imagen: (i) => ({ type: 'image_url', image_url: { url: `data:${i.mime};base64,${i.base64}` } }),
   },
@@ -184,35 +191,65 @@ const configurado = (p) => {
 };
 const pausados = new Map(); // proveedor → hasta cuándo no usarlo
 
+const pausaModelo = new Map(); // "proveedor/modelo" → hasta cuándo no usarlo
+
 async function compatible(p, { sistema, texto, imagenes }) {
   const prov = PROVEEDORES[p];
   const imgs = imagenes.slice(-prov.maxImagenes);
-  const res = await fetch(prov.url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${prov.clave()}` },
-    body: JSON.stringify({
-      model: prov.modelo(),
-      temperature: 0.8,
-      max_tokens: 1500,
-      messages: [
-        { role: 'system', content: sistema },
-        { role: 'user', content: imgs.length ? [...imgs.map(prov.imagen), { type: 'text', text: texto }] : texto },
-      ],
-    }),
-    signal: AbortSignal.timeout(imgs.length ? 20_000 : 12_000),
-  });
-  if (!res.ok) {
-    const detalle = (await res.text()).slice(0, 300);
-    const e = new Error(`${prov.nombre} respondió ${res.status}: ${detalle}`);
-    e.status = res.status;
+  const modelos = prov.modelos(imgs.length > 0);
+  const libres = modelos.filter((m) => !((pausaModelo.get(`${p}/${m}`) ?? 0) > Date.now()));
+  if (!libres.length) {
+    const e = new Error(`${prov.nombre}: todos sus modelos están descansando (límite)`);
+    e.status = 429; e.todos = true;
     throw e;
   }
-  const d = await res.json();
-  const t = d.choices?.[0]?.message?.content;
-  const texto2 = Array.isArray(t) ? t.map((x) => x.text ?? '').join('') : String(t ?? '');
-  const limpio = texto2.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\s+/g, ' ').trim();
-  if (!limpio) throw new Error(`${prov.nombre} respondió vacío`);
-  return limpio;
+  let ultimo;
+  for (const modelo of libres) {
+    let res;
+    try {
+      res = await fetch(prov.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${prov.clave()}` },
+        body: JSON.stringify({
+          model: modelo,
+          temperature: 0.8,
+          max_tokens: 1500,
+          ...(prov.extra?.(modelo) ?? {}),
+          messages: [
+            { role: 'system', content: sistema },
+            { role: 'user', content: imgs.length ? [...imgs.map(prov.imagen), { type: 'text', text: texto }] : texto },
+          ],
+        }),
+        signal: AbortSignal.timeout(imgs.length ? 20_000 : 12_000),
+      });
+    } catch (e) {
+      ultimo = e;
+      if (e.name === 'TimeoutError') { ultimo = new Error(`${prov.nombre} (${modelo}) tardó demasiado`); continue; }
+      throw e;
+    }
+    if (!res.ok) {
+      const detalle = (await res.text()).slice(0, 300);
+      const e = new Error(`${prov.nombre} (${modelo}) respondió ${res.status}: ${detalle}`);
+      e.status = res.status;
+      // Límite del día: ese modelo descansa 30 min. Por minuto: 1 min. Modelo que ya no existe: 1 día.
+      const minutos = res.status === 429 && /too large/i.test(detalle) ? 0
+        : res.status === 429 && /per day|\(TPD\)|\(RPD\)|daily/i.test(detalle) ? 30
+          : res.status === 429 ? 1
+            : res.status === 404 || /model_not_found|decommissioned|does not exist/i.test(detalle) ? 24 * 60
+              : res.status === 400 && modelos.length > 1 ? 60 : 0; // ese modelo no acepta algo de la petición: probamos otro
+      if (minutos) pausaModelo.set(`${p}/${modelo}`, Date.now() + minutos * 60_000);
+      ultimo = e;
+      if (minutos || res.status >= 500) { avisos(`IA: ${e.message.slice(0, 120)}; pruebo otro modelo…`); continue; }
+      throw e;
+    }
+    const d = await res.json();
+    const t = d.choices?.[0]?.message?.content;
+    const texto2 = Array.isArray(t) ? t.map((x) => x.text ?? '').join('') : String(t ?? '');
+    const limpio = texto2.replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\s+/g, ' ').trim();
+    if (!limpio) { ultimo = new Error(`${prov.nombre} (${modelo}) respondió vacío`); continue; }
+    return { texto: limpio, modelo };
+  }
+  throw ultimo ?? new Error(`${prov.nombre} no respondió`);
 }
 
 export const iasConfiguradas = () => ['gemini', ...Object.keys(PROVEEDORES).filter(configurado)];
@@ -238,15 +275,11 @@ export async function preguntarIA({ sistema, texto, imagenes = [], buscar = fals
     try {
       const r = await compatible(p, { sistema, texto, imagenes });
       marcar('ia', 'ok', `Funcionando (${PROVEEDORES[p].nombre})`);
-      return r;
+      return r.texto;
     } catch (e) {
       errores.push(e.name === 'TimeoutError' ? `${PROVEEDORES[p].nombre} tardó demasiado` : e.message);
-      // Límite del día: descansa 30 min. Límite por minuto: 1 min. Petición muy grande: no la castigamos.
-      const msg = String(e.message);
-      const minutos = e.status === 429 && /too large/i.test(msg) ? 0
-        : e.status === 429 && /per day|\(TPD\)|\(RPD\)|daily/i.test(msg) ? 30
-          : e.status === 429 ? 1 : 2;
-      if (minutos) pausados.set(p, Date.now() + minutos * 60_000);
+      // Si se trabó todo el proveedor (no un modelo en particular), descansa un poco.
+      if (!e.todos && !(e.status === 429 || e.status === 404)) pausados.set(p, Date.now() + 2 * 60_000);
       avisos(`IA: ${errores.at(-1).slice(0, 120)}; pruebo otra…`);
     }
   }

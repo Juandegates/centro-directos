@@ -2,7 +2,7 @@
 // tu horario (aprendido de tus directos), notas de tu partida y revisión de la categoría.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { preguntarIA } from './ia.js';
-import { marcar, log } from './estado.js';
+import { marcar, log, verPartes } from './estado.js';
 import * as twitch from './twitch.js';
 
 const ARCHIVO = new URL('./memoria.json', import.meta.url);
@@ -68,6 +68,9 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
         if (sinVivoSeguidas >= 3 && Date.now() - vivoDesde > 3 * 60_000) ponerVivo(false);
       }
       marcar('internet', 'ok', 'Conectado');
+      // Si Twitch falló un momento (por ejemplo, error 500 de sus servidores), el foco vuelve a verde solo.
+      const t = verPartes().find((x) => x.id === 'twitch');
+      if (t?.estado === 'aviso' && t.mensaje === 'No pude leer tu canal de Twitch') marcar('twitch', 'ok', 'Twitch volvió a responder; leyendo tu canal');
     } catch (e) {
       const sinRed = e.cause?.code || e.name === 'TimeoutError' || /fetch failed/i.test(e.message);
       marcar(sinRed ? 'internet' : 'twitch', sinRed ? 'error' : 'aviso', sinRed ? 'La PC no tiene internet o Twitch no responde' : 'No pude leer tu canal de Twitch', e.message);

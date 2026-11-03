@@ -4,7 +4,7 @@
 const $ = (s) => document.querySelector(s);
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const TITULOS = { vivo: 'En vivo', chat: 'Chat', publicar: 'Publicar', crecer: 'Crecer', diagnostico: 'Diagnóstico' };
-const NOMBRE_PLAT = { twitch: 'Twitch', youtube: 'YouTube' };
+const NOMBRE_PLAT = { twitch: 'Twitch', youtube: 'YouTube', kick: 'Kick' };
 
 let estado = null;
 let ultimoChat = 0;
@@ -139,6 +139,12 @@ function pintarEstado() {
       : !y.envio ? 'Envío apagado'
         : y.activo ? `${parte.envioYoutube?.mensaje ?? ''} · cuota ${y.cuota}/10000` : 'Arranca solo cuando sales en vivo';
   pintarInterruptor($('#interruptor-youtube'), y.envio);
+  const k = e.kick ?? {};
+  $('#kick-estado').textContent = !k.configurado ? 'Falta la clave de Kick en la PC'
+    : !k.envio ? 'Envío apagado'
+      : k.activo ? (parte.envioKick?.mensaje ?? '') : `Arranca solo cuando sales en vivo${k.sesion ? '' : ' · falta autorizar la app de Kick'}`;
+  pintarInterruptor($('#interruptor-kick'), k.envio);
+  pintarInterruptor($('#bot-kick'), !e.bot?.kick);
   pintarInterruptor($('#bot-twitch'), !e.bot?.twitch);
   pintarInterruptor($('#bot-youtube'), !e.bot?.youtube);
   $('#hacer-clip').disabled = !vivo;
@@ -213,7 +219,13 @@ $('#interruptor-youtube').addEventListener('click', async (ev) => {
   try { await api('/api/youtube', { cuerpo: { envio: nuevo } }); toast(nuevo ? 'Envío a YouTube encendido' : 'Envío a YouTube apagado'); } catch (e) { toast(e.message); }
   refrescarEstado();
 });
-for (const p of ['twitch', 'youtube']) {
+$('#interruptor-kick').addEventListener('click', async (ev) => {
+  const nuevo = ev.currentTarget.getAttribute('aria-checked') !== 'true';
+  pintarInterruptor(ev.currentTarget, nuevo);
+  try { await api('/api/kick', { cuerpo: { envio: nuevo } }); toast(nuevo ? 'Envío a Kick encendido' : 'Envío a Kick apagado'); } catch (e) { toast(e.message); }
+  refrescarEstado();
+});
+for (const p of ['twitch', 'youtube', 'kick']) {
   $('#bot-' + p).addEventListener('click', async (ev) => {
     const activo = ev.currentTarget.getAttribute('aria-checked') !== 'true';
     pintarInterruptor(ev.currentTarget, activo);

@@ -8,8 +8,8 @@ import { ajustes } from './ajustes.js';
 
 const ARCHIVO_CONOCIDOS = new URL('./conocidos.json', import.meta.url);
 const NADA = '(nada)';
-const NOMBRES = { twitch: 'Twitch', youtube: 'YouTube' };
-const LARGO_MENSAJE = { twitch: 480, youtube: 190 }; // lo que aguanta cada chat por mensaje
+const NOMBRES = { twitch: 'Twitch', youtube: 'YouTube', kick: 'Kick' };
+const LARGO_MENSAJE = { twitch: 480, youtube: 190, kick: 480 }; // lo que aguanta cada chat por mensaje
 const NOMBRE_PRUEBA = 'visitante_prueba';
 
 export const leerConfig = () => JSON.parse(readFileSync(new URL('./config.json', import.meta.url), 'utf8'));
@@ -209,7 +209,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
   async function animar() {
     const config = leerConfig();
     const a = config.animarChat ?? {};
-    if (!animarChat || !a.activo || ocupado || pausado()) return;
+    if (!(typeof animarChat === 'function' ? animarChat() : animarChat) || !a.activo || ocupado || pausado()) return;
     const espera = (a.minutosSinMensajes ?? 20) * 60_000;
     if (Date.now() - ultimoMensajeChat < espera || Date.now() - ultimoAnimo < espera) return;
     if (a.soloEnVivo && !datos.actual().enVivo) return;

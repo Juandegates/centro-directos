@@ -23,6 +23,14 @@ TWITCH_CANAL=tu_usuario_de_twitch
 GOOGLE_CLIENT_ID=pega_aqui_tu_id_de_cliente_de_google
 GOOGLE_CLIENT_SECRET=pega_aqui_tu_secreto_de_google
 
+# --- Kick (opcional) ---
+# Clave de transmisión: kick.com → Configuración del creador → Stream URL y Stream Key
+KICK_STREAM_URL=pega_aqui_la_stream_url_de_kick
+KICK_STREAM_KEY=pega_aqui_la_stream_key_de_kick
+# App de Kick (para título, juego y chat): kick.com → Configuración → Desarrollador
+KICK_CLIENT_ID=pega_aqui_tu_client_id_de_kick
+KICK_CLIENT_SECRET=pega_aqui_tu_client_secret_de_kick
+
 # --- App del celular: PIN para entrar (si lo dejas así, el Centro inventa uno y lo muestra) ---
 APP_PIN=pega_aqui_un_pin
 

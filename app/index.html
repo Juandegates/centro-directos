@@ -50,7 +50,7 @@
 
       <article class="tarjeta">
         <h2>Título y categoría</h2>
-        <label for="campo-titulo">Título (Twitch y YouTube)</label>
+        <label for="campo-titulo">Título (Twitch, YouTube y Kick)</label>
         <input id="campo-titulo" maxlength="140">
         <label for="campo-categoria">Categoría de Twitch</label>
         <input id="campo-categoria" placeholder="Busca un juego…" autocomplete="off">
@@ -64,6 +64,8 @@
         <div class="fila"><span class="punto twitch"></span><div class="crece"><strong>Twitch</strong><div id="twitch-estado" class="tenue">—</div></div><span id="twitch-pastilla" class="pastilla chica">—</span></div>
         <div class="fila"><span class="punto youtube"></span><div class="crece"><strong>YouTube</strong><div id="youtube-estado" class="tenue">—</div></div>
           <button class="interruptor" id="interruptor-youtube" role="switch" aria-checked="false" aria-label="Enviar directo a YouTube"><span></span></button></div>
+        <div class="fila"><span class="punto kick"></span><div class="crece"><strong>Kick</strong><div id="kick-estado" class="tenue">—</div></div>
+          <button class="interruptor" id="interruptor-kick" role="switch" aria-checked="false" aria-label="Enviar directo a Kick"><span></span></button></div>
         <div class="fila"><span class="punto tiktok"></span><div class="crece"><strong>TikTok</strong><div class="tenue">Clips listos en Publicar · en vivo al llegar a 1,000</div></div></div>
       </article>
 
@@ -73,6 +75,8 @@
           <button class="interruptor" id="bot-twitch" role="switch" aria-checked="true" aria-label="Bot en Twitch"><span></span></button></div>
         <div class="fila"><div class="crece"><strong>Bot en YouTube</strong><div class="tenue">Mismo cerebro, cuida la cuota diaria</div></div>
           <button class="interruptor" id="bot-youtube" role="switch" aria-checked="true" aria-label="Bot en YouTube"><span></span></button></div>
+        <div class="fila"><div class="crece"><strong>Bot en Kick</strong><div class="tenue">Platica cuando también transmites en Kick</div></div>
+          <button class="interruptor" id="bot-kick" role="switch" aria-checked="true" aria-label="Bot en Kick"><span></span></button></div>
       </article>
 
       <button id="hacer-clip" class="secundario ancho">🎬 Hacer clip ahora</button>
@@ -85,11 +89,12 @@
         <button class="chip activo" data-filtro="todas">Todos</button>
         <button class="chip" data-filtro="twitch"><span class="punto twitch"></span>Twitch</button>
         <button class="chip" data-filtro="youtube"><span class="punto youtube"></span>YouTube</button>
+        <button class="chip" data-filtro="kick"><span class="punto kick"></span>Kick</button>
       </div>
       <ol id="mensajes" class="mensajes"></ol>
       <form id="form-chat" class="enviar">
         <label for="destino" class="oculto">Enviar a</label>
-        <select id="destino"><option value="todas">Todas</option><option value="twitch">Twitch</option><option value="youtube">YouTube</option></select>
+        <select id="destino"><option value="todas">Todas</option><option value="twitch">Twitch</option><option value="youtube">YouTube</option><option value="kick">Kick</option></select>
         <label for="texto-chat" class="oculto">Mensaje</label>
         <input id="texto-chat" placeholder="Escribe como tú" autocomplete="off">
         <button class="primario icono" aria-label="Enviar">➤</button>

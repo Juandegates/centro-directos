@@ -3,7 +3,7 @@
   --fondo: #101114; --tarjeta: #1a1c21; --borde: #2a2d34; --borde2: #3a3e47;
   --texto: #f2f2f3; --tenue: #a3a7b0; --acento: #ffb547; --acento-texto: #101114;
   --bien: #7be3a0; --bien-fondo: #15291e; --mal: #ff7a7f; --mal-fondo: #2a1416; --aviso: #ffd27a; --aviso-fondo: #2b2213;
-  --twitch: #9146ff; --youtube: #ff4d4d; --tiktok: #25f4ee;
+  --twitch: #9146ff; --youtube: #ff4d4d; --tiktok: #25f4ee; --kick: #53fc18;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -51,7 +51,7 @@ button:disabled { opacity: .5; }
 .pastilla.chica { font-size: 12px; padding: 4px 10px; }
 .pastilla.ok { color: var(--bien); background: var(--bien-fondo); border-color: transparent; }
 .punto { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
-.punto.twitch { background: var(--twitch); } .punto.youtube { background: var(--youtube); } .punto.tiktok { background: var(--tiktok); }
+.punto.twitch { background: var(--twitch); } .punto.youtube { background: var(--youtube); } .punto.tiktok { background: var(--tiktok); } .punto.kick { background: var(--kick); }
 
 .interruptor { width: 52px; height: 32px; border-radius: 999px; border: 1px solid var(--borde2); background: #24262c; padding: 3px; justify-content: flex-start; flex: none; min-height: 32px; }
 .interruptor span { width: 24px; height: 24px; border-radius: 50%; background: var(--tenue); transition: transform .15s; }

@@ -13,6 +13,9 @@ export const PARTES = {
   youtube: 'Cuenta de YouTube',
   envioYoutube: 'Envío a YouTube',
   chatYoutube: 'Chat de YouTube',
+  kick: 'Cuenta de Kick',
+  envioKick: 'Envío a Kick',
+  chatKick: 'Chat de Kick',
   ia: 'IA en la nube (Gemini y Groq)',
   iaLocal: 'IA de respaldo (PC)',
   captura: 'Vista de pantalla',
@@ -57,7 +60,7 @@ export const verPartes = () => Object.entries(partes).map(([id, p]) => ({ id, no
 export const verBitacora = (n = 100) => bitacora.slice(-n);
 
 // Quita cualquier clave secreta de un texto antes de mostrarlo o copiarlo.
-const SECRETOS = ['GEMINI_API_KEY', 'MISTRAL_API_KEY', 'GROQ_API_KEY', 'TAVILY_API_KEY', 'TWITCH_CLIENT_SECRET', 'GOOGLE_CLIENT_SECRET', 'APP_PIN', 'GITHUB_TOKEN'];
+const SECRETOS = ['GEMINI_API_KEY', 'MISTRAL_API_KEY', 'GROQ_API_KEY', 'TAVILY_API_KEY', 'TWITCH_CLIENT_SECRET', 'GOOGLE_CLIENT_SECRET', 'KICK_CLIENT_SECRET', 'KICK_STREAM_KEY', 'APP_PIN', 'GITHUB_TOKEN'];
 export function limpiar(texto) {
   let t = String(texto ?? '');
   for (const k of SECRETOS) {

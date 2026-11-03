@@ -25,6 +25,7 @@ import * as chat from './chat.js';
 import * as bandeja from './bandeja.js';
 import * as twitch from './twitch.js';
 import * as youtube from './youtube.js';
+import * as kick from './kick.js';
 
 console.log(`\n=== Centro de Directos · v${VERSION} ===\n`);
 alAvisoIA((t) => log(t));
@@ -61,6 +62,7 @@ if (!ajustes().pin) guardarAjustes({ pin: String(randomInt(100000, 999999)) });
 const PIN = process.env.APP_PIN && !process.env.APP_PIN.startsWith('pega_aqui') ? process.env.APP_PIN : ajustes().pin;
 // Dirección de la app para los avisos: la de Tailscale si está instalado (funciona fuera de casa).
 let urlDetectada = `http://${hostname().toLowerCase()}:3000`;
+let nombreTailscale = ''; // p. ej. tu-pc.tail1234.ts.net (para la dirección pública de los avisos de Kick)
 function detectarUrl() {
   for (const exe of ['tailscale', 'C:\\Program Files\\Tailscale\\tailscale.exe']) {
     const r = spawnSync(exe, ['status', '--json'], { windowsHide: true, timeout: 8000 });
@@ -68,6 +70,7 @@ function detectarUrl() {
     try {
       const yo = JSON.parse(r.stdout.toString()).Self;
       const nombre = (yo?.DNSName ?? '').replace(/\.$/, '');
+      nombreTailscale = nombre;
       const servido = spawnSync(exe, ['serve', 'status'], { windowsHide: true, timeout: 8000 }).stdout?.toString() ?? '';
       if (nombre && /3000/.test(servido)) urlDetectada = `https://${nombre}`;
       else if (yo?.TailscaleIPs?.[0]) urlDetectada = `http://${yo.TailscaleIPs[0]}:3000`;
@@ -226,6 +229,107 @@ async function sincronizarTituloYoutube(titulo) {
     .catch((e) => marcar('youtube', 'aviso', 'No pude cambiar el título en YouTube', e.message));
 }
 
+// ---------- Kick ----------
+// Igual que YouTube: la PC toma tu directo de Twitch y lo reenvía a Kick. Con la sesión de Kick
+// además pone tu mismo título y juego, y el bot platica en el chat de Kick.
+const kk = { activo: false, relevo: null, revision: null, canal: null, tituloPuesto: '', juegoPuesto: '', ultimaFalla: 0 };
+const PUERTO_AVISOS_KICK = () => leerConfig().kick?.puertoAvisos ?? 3001;
+const urlAvisosKick = () => (nombreTailscale ? `https://${nombreTailscale}:8443/kick/eventos` : '(instala Tailscale en la PC)');
+
+async function canalKick() {
+  if (!kk.canal) kk.canal = await kick.miCanal();
+  return kk.canal;
+}
+
+async function iniciarKick() {
+  if (kk.activo) return;
+  if (ajustes().envioKick === false) return marcar('envioKick', 'apagado', 'Envío a Kick apagado desde la app');
+  if (!kick.envioConfigurado()) return marcar('envioKick', 'apagado', 'Sin configurar (falta la clave de transmisión de Kick en claves.txt)');
+  kk.activo = true;
+  let fallas = 0;
+  const lanzar = () => {
+    kk.relevo = lanzarDesdeTwitch({
+      config: leerConfig(),
+      canal: ctx.canal.login,
+      calidad: 'best',
+      argsSalida: ['-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-f', 'flv', '-flvflags', 'no_duration_filesize', kick.urlEnvio()],
+      alError: (m) => marcar('envioKick', 'error', m),
+      alTerminar: (codigo, errores) => {
+        if (!kk.activo) return;
+        fallas++;
+        kk.ultimaFalla = Date.now();
+        const espera = Math.min(60, 5 * fallas);
+        if (fallas >= 2) marcar('envioKick', fallas >= 3 ? 'error' : 'aviso', `Se cortó el envío a Kick; reintento en ${espera} s`, errores || `código ${codigo}`);
+        setTimeout(() => kk.activo && lanzar(), espera * 1000);
+      },
+    });
+    if (fallas === 0) marcar('envioKick', 'aviso', 'Enviando señal a Kick… (confirmando)');
+  };
+  lanzar();
+  setTimeout(revisarKick, 45_000);
+  kk.revision = setInterval(revisarKick, 120_000);
+}
+
+// Cada 2 min: ¿Kick ya te ve en vivo? ¿Cambiaste de título o de juego en Twitch? Se copia a Kick.
+async function revisarKick() {
+  if (!kk.activo) return;
+  if (!kick.tieneSesion()) {
+    if (kk.relevo && Date.now() - kk.ultimaFalla > 3 * 60_000) marcar('envioKick', 'ok', 'Enviando a Kick (autoriza Kick en la PC para confirmar y poner tu título)');
+    return;
+  }
+  try {
+    const c = await kick.miCanal();
+    kk.canal = { ...kk.canal, ...c };
+    if (c.enVivo) marcar('envioKick', 'ok', `En vivo en Kick${c.espectadores ? ` · ${c.espectadores} viendo` : ''}`);
+    const d = ctx.datos.actual();
+    const cambios = {};
+    if (d.titulo && d.titulo !== kk.tituloPuesto) cambios.titulo = d.titulo;
+    if (d.juego && d.juego !== kk.juegoPuesto) {
+      const cat = await kick.buscarCategoria(d.juego).catch(() => null);
+      if (cat?.id) cambios.categoriaId = cat.id;
+      else if (kk.juegoPuesto !== d.juego) log(`Kick no tiene la categoría "${d.juego}"; dejo la que estaba`);
+      kk.juegoPuesto = d.juego;
+    }
+    if (Object.keys(cambios).length) {
+      await kick.cambiarCanal(cambios);
+      if (cambios.titulo) kk.tituloPuesto = cambios.titulo;
+      log(`Kick: ${[cambios.titulo && 'título', cambios.categoriaId && 'juego'].filter(Boolean).join(' y ')} igual que en Twitch`);
+    }
+    marcar('kick', 'ok', `Canal kick.com/${c.slug}`);
+  } catch (e) {
+    marcar('kick', 'aviso', 'No pude leer tu canal de Kick', e.message);
+  }
+}
+
+async function detenerKick() {
+  const estaba = kk.activo;
+  kk.activo = false;
+  clearInterval(kk.revision);
+  kk.relevo?.detener();
+  kk.relevo = null;
+  kk.tituloPuesto = '';
+  kk.juegoPuesto = '';
+  if (estaba || kick.envioConfigurado()) marcar('envioKick', 'apagado', 'Sin directo');
+}
+
+// Sesión de Kick lista: datos del canal y aviso de mensajes del chat.
+async function prepararKick() {
+  if (!kick.configurado()) return marcar('kick', 'apagado', 'Sin configurar');
+  if (!kick.tieneSesion()) return marcar('kick', 'aviso', 'Falta autorizar Kick: abre http://localhost:3000/kick en la PC');
+  try {
+    const c = await canalKick();
+    marcar('kick', 'ok', `Canal kick.com/${c.slug}`);
+  } catch (e) {
+    return marcar('kick', 'aviso', 'No pude leer tu canal de Kick', e.message);
+  }
+  try {
+    await kick.suscribirChat();
+    marcar('chatKick', 'aviso', 'Esperando el primer mensaje del chat de Kick');
+  } catch (e) {
+    marcar('chatKick', 'aviso', 'Kick no aceptó avisarme del chat (revisa la dirección de webhooks de tu app de Kick)', e.message);
+  }
+}
+
 // ---------- Inicio y fin del directo ----------
 let inicioDirecto = null;
 
@@ -241,11 +345,12 @@ async function alEmpezar() {
     ctx.momentos.retomar();
     ctx.captura.iniciar();
     await iniciarYoutube({ reanudar: true });
+    iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message));
     ctx.crecer.alEmpezar({ reanudar: true }).catch(() => {});
     setTimeout(() => {
       const p = Object.fromEntries(verPartes().map((x) => [x.id, x.estado]));
       const s = (e) => (e === 'ok' ? '✅' : e === 'apagado' ? '⚪' : '⚠️');
-      avisar('🔄 Centro reiniciado, sigues en vivo', `Twitch ✅ · YouTube ${s(p.envioYoutube)} · Bot ${s(p.chatTwitch)} · Vista ${s(p.captura)}`, { etiquetas: ['arrows_counterclockwise'], abrir: urlApp(), clave: 'reanudado', cadaMinutos: 10 });
+      avisar('🔄 Centro reiniciado, sigues en vivo', `Twitch ✅ · YouTube ${s(p.envioYoutube)}${kick.envioConfigurado() ? ` · Kick ${s(p.envioKick)}` : ''} · Bot ${s(p.chatTwitch)} · Vista ${s(p.captura)}`, { etiquetas: ['arrows_counterclockwise'], abrir: urlApp(), clave: 'reanudado', cadaMinutos: 10 });
     }, 60_000);
     return;
   }
@@ -254,14 +359,16 @@ async function alEmpezar() {
   ctx.momentos.nuevoDirecto();
   ctx.captura.iniciar();
   ctx.crecer.alEmpezar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
+  ctx.bots.kick.nuevoDirecto();
   await iniciarYoutube();
+  iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message));
   ctx.promos.alEmpezar().catch(() => {});
   // Al minuto y medio, un resumen de cómo arrancó todo.
   setTimeout(() => {
     if (!ctx.datos.actual().enVivo) return;
     const p = Object.fromEntries(verPartes().map((x) => [x.id, x.estado]));
     const s = (e) => (e === 'ok' ? '✅' : e === 'apagado' ? '⚪' : '⚠️');
-    avisar('🔴 Estás en vivo', `Twitch ✅ · YouTube ${s(p.envioYoutube)} · Bot ${s(p.chatTwitch)} · Vista ${s(p.captura)}\n${ctx.datos.actual().juego}`, {
+    avisar('🔴 Estás en vivo', `Twitch ✅ · YouTube ${s(p.envioYoutube)}${kick.envioConfigurado() ? ` · Kick ${s(p.envioKick)}` : ''} · Bot ${s(p.chatTwitch)} · Vista ${s(p.captura)}\n${ctx.datos.actual().juego}`, {
       etiquetas: ['red_circle'], abrir: urlApp(), clave: 'en-vivo', cadaMinutos: 30,
     });
   }, 90_000);
@@ -274,6 +381,7 @@ async function alTerminar() {
   const d = ctx.datos.actual();
   ctx.captura.detener();
   const directoYt = await detenerYoutube();
+  await detenerKick();
   avisar('⚫ Terminó tu directo', `Duró ${minutos} min. Preparando el resumen…`, { etiquetas: ['black_circle'], clave: 'fin', cadaMinutos: 30 });
   await ctx.crecer.alTerminar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
   if (minutos >= 5) ctx.promos.alTerminar({ minutos }).catch(() => {});
@@ -291,7 +399,7 @@ async function alTerminar() {
 }
 
 // Bots de otros servicios que escriben en tu chat: el Centro no les contesta ni los cuenta para clips.
-const BOTS = ['streamelements', 'nightbot', 'moobot', 'streamlabs', 'fossabot', 'wizebot', 'soundalerts', 'sery_bot', 'kofistreambot', 'botrixoficial', 'commanderroot', 'pokemoncommunitygame', 'own3d', 'tangiabot', 'blerp', 'lumiastream', 'creatisbot', 'frostytoolsdotcom'];
+const BOTS = ['kickbot', 'botrix', 'streamelements', 'nightbot', 'moobot', 'streamlabs', 'fossabot', 'wizebot', 'soundalerts', 'sery_bot', 'kofistreambot', 'botrixoficial', 'commanderroot', 'pokemoncommunitygame', 'own3d', 'tangiabot', 'blerp', 'lumiastream', 'creatisbot', 'frostytoolsdotcom'];
 const esBotConocido = (nombre) => {
   const n = String(nombre ?? '').toLowerCase();
   return [...BOTS, ...(leerConfig().botsIgnorados ?? []).map((x) => String(x).toLowerCase())].includes(n);
@@ -325,6 +433,11 @@ async function iniciar() {
     youtube: crearBot({
       plataforma: 'youtube', datos: ctx.datos, verPantalla,
       enviar: (texto) => (yt.directo ? youtube.enviarChat(yt.directo.chatId, texto) : Promise.resolve()),
+    }),
+    kick: crearBot({
+      plataforma: 'kick', datos: ctx.datos, verPantalla, animarChat: () => kk.activo && kick.tieneSesion() && leerConfig().kick?.animarChat !== false,
+      // Solo escribe en Kick si de verdad estás transmitiendo ahí (si no, nadie lo vería).
+      enviar: async (texto) => { if (kk.activo && kick.tieneSesion()) await kick.enviarChat((await canalKick()).id, texto); },
     }),
   };
   ctx.clips = crearClips({
@@ -360,6 +473,21 @@ async function iniciar() {
       ctx.bots.twitch.seguidor(ev.user_name);
     },
   });
+
+  prepararKick().catch(() => {});
+}
+
+// Mensajes del chat de Kick (llegan como avisos firmados por Kick).
+function alMensajeKick(ev) {
+  if (!ctx) return;
+  const texto = kick.limpiarTexto(ev.content);
+  const nombre = ev.sender?.username ?? 'alguien';
+  const esMio = Boolean(kk.canal?.id) && String(ev.sender?.user_id) === String(kk.canal.id);
+  if (!texto) return;
+  marcar('chatKick', 'ok', 'Leyendo el chat de Kick');
+  if (!esMio && esBotConocido(nombre)) return;
+  if (!esMio) ctx.clips.registrarMensaje({ nombre, texto, plataforma: 'kick' });
+  ctx.bots.kick.recibir({ usuarioId: ev.sender?.user_id ?? nombre, nombre, texto, esMio }).catch(() => {});
 }
 
 // ---------- Rutas de la app ----------
@@ -376,6 +504,7 @@ const rutas = {
       canal: ctx?.canal.display_name,
       directo: d ?? null,
       youtube: { activo: Boolean(yt.directo), url: yt.directo?.url ?? null, envio: ajustes().envioYoutube, cuota: youtube.cuotaUsada(), configurado: youtube.configurado(), sesion: youtube.tieneSesion() },
+      kick: { activo: kk.activo, envio: ajustes().envioKick !== false, configurado: kick.envioConfigurado(), sesion: kick.tieneSesion(), canal: kk.canal?.slug ?? null },
       bot: ajustes().botPausado,
       partes: verPartes(),
       temaAvisos: ajustes().temaAvisos,
@@ -387,11 +516,14 @@ const rutas = {
     necesitaCtx();
     const texto = String(cuerpo.texto ?? '').trim();
     if (!texto) throw new Error('Mensaje vacío');
-    const destinos = cuerpo.plataforma === 'todas' ? ['twitch', 'youtube'] : [cuerpo.plataforma];
+    const destinos = cuerpo.plataforma === 'todas' ? ['twitch', 'youtube', 'kick'] : [cuerpo.plataforma];
     for (const p of destinos) {
       if (p === 'twitch') await twitch.enviarMensaje({ canalId: ctx.canal.id, emisorId: ctx.yo.id, texto });
       if (p === 'youtube' && yt.directo) {
         await youtube.enviarChat(yt.directo.chatId, texto); // regresa por el chat y se registra como tuyo
+      }
+      if (p === 'kick' && kk.activo && kick.tieneSesion()) {
+        await kick.enviarChat((await canalKick()).id, texto); // regresa por el aviso de Kick y se registra como tuyo
       }
     }
     return { ok: true };
@@ -416,6 +548,12 @@ const rutas = {
     guardarAjustes({ envioYoutube: Boolean(cuerpo.envio) });
     if (!cuerpo.envio) await detenerYoutube();
     else if (ctx?.datos.actual().enVivo) await iniciarYoutube();
+    return { ok: true };
+  },
+  'POST /api/kick': async ({ cuerpo }) => {
+    guardarAjustes({ envioKick: Boolean(cuerpo.envio) });
+    if (!cuerpo.envio) await detenerKick();
+    else if (ctx?.datos.actual().enVivo) await iniciarKick();
     return { ok: true };
   },
   'GET /api/bandeja': () => bandeja.lista(),
@@ -512,6 +650,25 @@ const paginasLocales = {
   '/youtube': () => (youtube.configurado()
     ? { redirigir: youtube.urlLogin() }
     : { html: '❌ Primero pon GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en claves.txt y reinicia el Centro.' }),
+  '/kick/ayuda': () => ({ html: `<h3>Kick · direcciones para tu app de desarrollador</h3>
+<p><b>Redirect URL:</b> <code>${kick.URL_CALLBACK}</code></p>
+<p><b>Webhook URL:</b> <code>${urlAvisosKick()}</code></p>
+<p>Para que Kick pueda avisar los mensajes del chat, en esta PC abre PowerShell y corre una sola vez:<br><code>tailscale funnel --bg --https=8443 ${PUERTO_AVISOS_KICK()}</code></p>` }),
+  '/kick': () => (kick.configurado()
+    ? { redirigir: kick.urlLogin() }
+    : { html: `<h3>Kick todavía no está configurado</h3><p>Al crear tu app en <b>kick.com → Configuración → Desarrollador</b> usa estas direcciones:</p>
+<p><b>Redirect URL:</b> <code>${kick.URL_CALLBACK}</code><br><b>Webhook URL:</b> <code>${urlAvisosKick()}</code></p>
+<p>Luego pon KICK_CLIENT_ID y KICK_CLIENT_SECRET en claves.txt y reinicia el Centro.</p>` }),
+  '/kick/callback': async ({ url }) => {
+    const code = url.searchParams.get('code');
+    if (!code) return { html: '❌ Kick no dio permiso. Cierra esta pestaña e inténtalo otra vez.' };
+    await kick.canjearCodigo(code, url.searchParams.get('state'));
+    kk.canal = null;
+    const c = await canalKick();
+    marcar('kick', 'ok', `Canal kick.com/${c.slug}`);
+    prepararKick().catch(() => {});
+    return { html: `✅ Listo, Kick conectado al canal <b>kick.com/${c.slug}</b>. Puedes cerrar esta pestaña.` };
+  },
   '/google/callback': async ({ url }) => {
     const code = url.searchParams.get('code');
     if (!code) return { html: '❌ Google no dio permiso. Cierra esta pestaña e inténtalo otra vez.' };
@@ -529,6 +686,11 @@ log(`🔔 Avisos: en la app ntfy suscríbete al tema ${ajustes().temaAvisos}`);
 if (youtube.configurado() && youtube.tieneSesion()) marcar('youtube', 'ok', 'Sesión guardada');
 else if (youtube.configurado()) marcar('youtube', 'aviso', 'Falta autorizar YouTube: abre http://localhost:3000/youtube en la PC');
 else marcar('youtube', 'apagado', 'Sin configurar');
+if (kick.envioConfigurado()) marcar('envioKick', 'apagado', 'Arranca solo cuando sales en vivo');
+else marcar('envioKick', 'apagado', 'Sin configurar');
+if (!kick.configurado()) marcar('kick', 'apagado', 'Sin configurar');
+else if (!kick.tieneSesion()) marcar('kick', 'aviso', 'Falta autorizar Kick: abre http://localhost:3000/kick en la PC');
+if (kick.configurado()) kick.escucharAvisos({ puerto: PUERTO_AVISOS_KICK(), alMensaje: alMensajeKick });
 if (leerConfig().iaLocal?.activa) marcar('iaLocal', 'aviso', 'Lista para entrar si Gemini falla');
 else marcar('iaLocal', 'apagado', 'Desactivada');
 

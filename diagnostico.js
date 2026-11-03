@@ -7,6 +7,7 @@ import { preguntarIA, iasConfiguradas } from './ia.js';
 import { buscar, buscadorConfigurado, usadasEsteMes } from './buscador.js';
 import * as twitch from './twitch.js';
 import * as youtube from './youtube.js';
+import * as kick from './kick.js';
 import { avisar } from './avisos.js';
 import { limpiar } from './estado.js';
 
@@ -59,6 +60,15 @@ export async function probarTodo({ leerConfig, canalId }) {
     const c = await youtube.miCanal();
     return `Canal "${c.nombre}" · cuota usada hoy: ${youtube.cuotaUsada()} de 10,000`;
   }));
+  if (kick.envioConfigurado() || kick.configurado()) {
+    resultados.push(await prueba('Kick', async () => {
+      if (!kick.envioConfigurado()) throw new Error('Falta KICK_STREAM_URL y KICK_STREAM_KEY en claves.txt (sin eso no se envía el video)');
+      if (!kick.configurado()) return 'Clave de transmisión lista · sin app de Kick (no pone título ni platica en el chat)';
+      if (!kick.tieneSesion()) throw new Error('Falta autorizar Kick en http://localhost:3000/kick desde la PC');
+      const c = await kick.miCanal();
+      return `Canal kick.com/${c.slug} · clave de transmisión lista`;
+    }));
+  }
   // Cada IA de la nube por separado, para saber cuáles funcionan.
   for (const p of iasConfiguradas()) {
     const nombre = { gemini: 'Gemini', mistral: 'Mistral', groq: 'Groq' }[p];

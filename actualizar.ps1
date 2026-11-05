@@ -28,7 +28,7 @@ try {
     /XF claves.txt tokens.json google-tokens.json kick-tokens.json meta-tokens.json publicacion.json publicos.json centro.pid detener.flag ajustes.json memoria.json conocidos.json bandeja.json config.json estadisticas.json busquedas.json `
     /XD candidatos logs grabacion clips piezas | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "No se pudieron copiar los archivos (robocopy $LASTEXITCODE)" }
-  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp
+  try { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction Stop } catch { } # si no se puede borrar la carpeta temporal, no importa
   $v = (Get-Content (Join-Path $Carpeta 'package.json') -Raw | ConvertFrom-Json).version
   Paso "Listo: versión $v. Encendiendo el Centro…"
 } catch {

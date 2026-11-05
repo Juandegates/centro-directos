@@ -1,6 +1,8 @@
 // Centro de Directos · v3: todo automático y enfocado en crecer. Tú solo le das "Transmitir" en la PS5.
 import { hostname } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { randomInt } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { crearBot, leerConfig } from './bot.js';
@@ -664,6 +666,13 @@ const rutas = {
     const v = await revisarVersion(true);
     if (v.error) throw new Error(v.error);
     if (!v.hayNueva) return { ok: true, mensaje: `Ya tienes la versión más nueva (${VERSION}).` };
+    // En Windows la actualización la hace un script aparte (fuera del Centro): copia con robocopy y lo vuelve a encender.
+    if (process.platform === 'win32' && existsSync(new URL('./actualizar.ps1', import.meta.url))) {
+      const ps = fileURLToPath(new URL('./actualizar.ps1', import.meta.url));
+      spawn('cmd.exe', ['/c', 'start', '""', '/min', 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ps], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      log(`⬆️ Actualizando a ${v.version} (el Centro se apaga y vuelve a encender solo)…`);
+      return { ok: true, mensaje: `Actualizando a ${v.version}. El Centro se reinicia solo; recarga la app en 1 minuto.` };
+    }
     const nueva = await actualizar();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true, mensaje: `Actualizado a ${nueva}. El Centro se reinicia; recarga la app en 20 segundos.` }));

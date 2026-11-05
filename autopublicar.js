@@ -5,7 +5,7 @@
 // - Los días sin directo, a las 6 pm, sale un video "gancho" con lo mejor que quedó guardado.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { lista as bandeja, actualizar, CARPETA_CLIPS } from './bandeja.js';
-import { publicarEn, confirmar, destinosListos, NOMBRES } from './publicar.js';
+import { publicarEn, confirmar, destinosListos, NOMBRES, xPorBuffer, canalesBuffer, bufferConfigurado } from './publicar.js';
 import { log, marcar } from './estado.js';
 
 const ARCHIVO = new URL('./publicacion.json', import.meta.url);
@@ -71,6 +71,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
   }
 
   function usarX() {
+    if (xPorBuffer()) return true; // por Buffer no hay límite al mes
     if (s.xMes.mes !== mes()) s.xMes = { mes: mes(), usados: 0 };
     if (s.xMes.usados >= cfg().maxXMes) return false;
     return true;
@@ -111,7 +112,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     let t = Date.now();
     let programados = 0;
     videos.forEach((v, i) => {
-      const conX = i === 0 && usarX(); // X tiene 10 al mes: va el mejor de cada directo
+      const conX = xPorBuffer() || (i === 0 && usarX()); // por Upload-Post X tiene 10 al mes: va el mejor de cada directo
       if (encolar(v, t, { conX })) programados++;
       t += c.horasEntre * HORA;
     });
@@ -130,7 +131,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     log('🎣 Hoy no hubo directo: Claude arma un video gancho con lo guardado');
     const item = await candidatos.videoGancho();
     if (!item) { log('🎣 No hay momentos guardados para el gancho de hoy'); return; }
-    encolar(item, Date.now());
+    encolar(item, Date.now(), { conX: xPorBuffer() });
     avisar('🎣 Video gancho de hoy', `${item.titulo}\nSale en tus redes porque hoy no hubo directo.`, { abrir: `${urlApp()}#publicar`, clave: 'gancho-' + hoy() });
   }
 
@@ -156,7 +157,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
           d.info = r; d.url = r.url ?? null; d.hora = Date.now();
           if (r.pendiente) d.estado = 'enviado';
           else { d.estado = 'ok'; actualizar(item.id, { publicado: { [destino]: r.url || true } }); }
-          if (destino === 'x') { s.xMes.usados++; }
+          if (destino === 'x' && !xPorBuffer()) { s.xMes.usados++; }
           log(`📤 ${NOMBRES[destino]}: "${item.titulo}" ${r.pendiente ? 'enviado (confirmando)' : 'publicado'}`);
           marcar('publicar', 'ok', `Último: ${NOMBRES[destino]} · ${item.titulo}`);
         } catch (err) {
@@ -164,7 +165,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
           if (err.name === 'TimeoutError' || /timeout|aborted/i.test(err.message)) {
             d.estado = 'dudoso';
             d.error = 'Tardó demasiado en responder; revisa si salió';
-            if (destino === 'x') s.xMes.usados++;
+            if (destino === 'x' && !xPorBuffer()) s.xMes.usados++;
             log(`❔ ${NOMBRES[destino]} tardó demasiado con "${item.titulo}": no lo reintento para no duplicarlo`, { nivel: 'aviso' });
             guardar();
             continue;
@@ -199,6 +200,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     if (!c.activo || trabajando) return;
     trabajando = true;
     try {
+      if (bufferConfigurado()) await canalesBuffer().catch(() => {}); // saber qué redes tienes en Buffer (cada 30 min)
       // La PC estuvo apagada cuando terminó el directo: se da por terminado cuando ya era (5 min después de arrancar).
       if (s.enDirecto && !enVivo() && Date.now() - arranque > 5 * 60_000) {
         const fin = Math.max(candidatos.ultimaHora(), s.enDirecto.inicio);

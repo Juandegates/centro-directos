@@ -31,7 +31,7 @@ import * as kick from './kick.js';
 import { crearCandidatos } from './candidatos.js';
 import { crearAutopublicar } from './autopublicar.js';
 import { iniciarPublico, configurarBase, urlBase } from './publico.js';
-import { metaConfigurado, metaPaginas, metaGuardar, metaInfo, destinosListos } from './publicar.js';
+import { metaConfigurado, metaPaginas, metaGuardar, metaInfo, destinosListos, xPorBuffer, postTextoX, canalesBuffer, bufferConfigurado } from './publicar.js';
 import { writeFileSync as escribirArchivo } from 'node:fs';
 
 console.log(`\n=== Centro de Directos · v${VERSION} ===\n`);
@@ -478,7 +478,15 @@ async function iniciar() {
   ctx.crecer = crearCrecer({ canal, datos: ctx.datos, leerConfig, avisar, urlApp });
   ctx.editor = crearEditor({ leerConfig, clips: ctx.clips, avisar, urlApp, canalLogin: canal.login });
   ctx.resumen = crearResumen({ leerConfig, datos: ctx.datos, avisar, urlApp, canalLogin: canal.login, momentos: ctx.momentos });
-  ctx.promos = crearPromos({ datos: ctx.datos, avisar, urlApp, urlTwitch: () => `https://twitch.tv/${canal.login}` });
+  ctx.promos = crearPromos({
+    datos: ctx.datos, avisar, urlApp, urlTwitch: () => `https://twitch.tv/${canal.login}`,
+    publicarX: async (texto) => {
+      if (leerConfig().autoPublicar?.activo === false || leerConfig().autoPublicar?.destinos?.x === false || !xPorBuffer()) return false;
+      await postTextoX(texto, leerConfig());
+      log('📣 Publicado en X: ' + texto.slice(0, 60));
+      return true;
+    },
+  });
   ctx.auto = crearAutopublicar({ leerConfig, candidatos: ctx.candidatos, resumen: ctx.resumen, avisar, urlApp, enVivo: () => ctx.datos.actual().enVivo });
   // Si el Centro se reinició mientras esperaba para publicar, recupera los pedacitos del resumen.
   if (ctx.auto.hayPendiente()) ctx.momentos.retomar();
@@ -770,6 +778,7 @@ else if (!kick.tieneSesion()) marcar('kick', 'aviso', 'Falta autorizar Kick: abr
 // Puerto 3001 (público por Funnel): avisos de Kick y videos para que Buffer/Meta/Upload-Post los descarguen.
 configurarBase(() => leerConfig().autoPublicar?.urlPublica || (nombreTailscale ? `https://${nombreTailscale}${funnel443 ? '' : ':8443'}` : ''));
 iniciarPublico({ puerto: PUERTO_AVISOS_KICK(), alAvisoKick: kick.configurado() ? kick.manejadorAvisos({ alMensaje: alMensajeKick }) : null });
+if (bufferConfigurado()) await canalesBuffer().catch(() => {});
 if (destinosListos(leerConfig()).length) marcar('publicar', 'ok', `Listo para publicar en: ${destinosListos(leerConfig()).join(', ')}`);
 else marcar('publicar', 'apagado', 'Sin redes conectadas (los videos quedan en Publicar para subirlos tú)');
 if (leerConfig().iaLocal?.activa) marcar('iaLocal', 'aviso', 'Lista para entrar si Gemini falla');

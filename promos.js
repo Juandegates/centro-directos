@@ -1,6 +1,6 @@
 // Posts de promoción: "ya estoy en vivo" al empezar y un resumen al terminar.
 import { preguntarIA } from './ia.js';
-import { agregar, nuevoId, lista } from './bandeja.js';
+import { agregar, nuevoId, lista, actualizar } from './bandeja.js';
 
 // Recorta un texto sin dejar palabras a medias: en la última frase completa, o si no en la última palabra.
 export function recortar(texto, max) {
@@ -14,7 +14,7 @@ export function recortar(texto, max) {
 
 export const urlX = (texto) => `https://x.com/intent/post?text=${encodeURIComponent(texto)}`;
 
-export function crearPromos({ datos, avisar, urlApp, urlTwitch }) {
+export function crearPromos({ datos, avisar, urlApp, urlTwitch, publicarX = async () => false }) {
   async function escribir(instruccion, respaldo) {
     const d = datos.actual();
     try {
@@ -33,7 +33,13 @@ export function crearPromos({ datos, avisar, urlApp, urlTwitch }) {
       const d = datos.actual();
       const texto = await escribir('Escribe un post anunciando que estas EN VIVO ahora mismo. No incluyas links (se agregan solos).', `¡Ya estoy en vivo jugando ${d.juego}! Caile 🎮`);
       const final = `${texto}\n${urlTwitch()}`;
-      agregar({ id: nuevoId(), tipo: 'post', titulo: 'Anuncio: estoy en vivo', textoX: final });
+      const item = agregar({ id: nuevoId(), tipo: 'post', titulo: 'Anuncio: estoy en vivo', textoX: final });
+      // Con X conectado en Buffer, el anuncio sale solo.
+      if (await publicarX(final).catch(() => false)) {
+        actualizar(item.id, { publicado: { x: true } });
+        avisar('📣 Publiqué en X que estás en vivo', final, { etiquetas: ['loudspeaker'], clave: 'anuncio-vivo', cadaMinutos: 60 });
+        return;
+      }
       avisar('📣 Anuncio listo para X', final, {
         etiquetas: ['loudspeaker'],
         acciones: [{ texto: 'Publicar en X', url: urlX(final) }, { texto: 'Ver en la app', url: `${urlApp()}#publicar` }],
@@ -48,7 +54,12 @@ export function crearPromos({ datos, avisar, urlApp, urlTwitch }) {
         `Escribe un post de agradecimiento y resumen del directo que acaba de terminar (${minutos} minutos). Momentos destacados: ${clips.map((c) => c.titulo).join('; ') || 'ninguno registrado'}. Invita al proximo directo (${d.horario}).`,
         `¡Gracias a todos por el directo de hoy de ${d.juego}! Nos vemos en el próximo 🎮`,
       );
-      agregar({ id: nuevoId(), tipo: 'post', titulo: 'Resumen del directo', textoX: texto });
+      const item = agregar({ id: nuevoId(), tipo: 'post', titulo: 'Resumen del directo', textoX: texto });
+      if (await publicarX(texto).catch(() => false)) {
+        actualizar(item.id, { publicado: { x: true } });
+        avisar('📝 Publiqué en X el resumen del directo', texto, { etiquetas: ['memo'], clave: 'resumen', cadaMinutos: 30 });
+        return;
+      }
       avisar('📝 Resumen del directo listo', texto, {
         etiquetas: ['memo'],
         acciones: [{ texto: 'Publicar en X', url: urlX(texto) }, { texto: 'Ver en la app', url: `${urlApp()}#publicar` }],

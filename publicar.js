@@ -46,9 +46,10 @@ export async function canalesBuffer(forzar = false) {
   return bufferCache;
 }
 
+const SERVICIOS = { tiktok: ['tiktok'], youtube: ['youtube'], twitter: ['twitter', 'x'] };
 function canalDe(servicio, config) {
   const quiero = String(config.autoPublicar?.buffer?.[servicio] ?? '').toLowerCase();
-  const opciones = bufferCache.canales.filter((c) => c.service === servicio && !c.isDisconnected && !c.isLocked);
+  const opciones = bufferCache.canales.filter((c) => (SERVICIOS[servicio] ?? [servicio]).includes(c.service) && !c.isDisconnected && !c.isLocked);
   return opciones.find((c) => quiero && [c.name, c.displayName].some((n) => String(n ?? '').toLowerCase().includes(quiero))) ?? opciones[0] ?? null;
 }
 
@@ -59,10 +60,10 @@ const MUTACION = `mutation P($input: CreatePostInput!) { createPost(input: $inpu
 async function publicarBuffer(servicio, { url, texto, titulo }, config) {
   await canalesBuffer();
   const canal = canalDe(servicio, config);
-  if (!canal) throw new Error(`Buffer no tiene conectado ${servicio === 'youtube' ? 'YouTube' : 'TikTok'}`);
+  if (!canal) throw new Error(`Buffer no tiene conectado ${{ youtube: 'YouTube', tiktok: 'TikTok', twitter: 'X' }[servicio] ?? servicio}`);
   const input = {
     channelId: canal.id, text: texto, schedulingType: 'automatic', mode: 'shareNow', needsApproval: false,
-    assets: [{ video: { url } }],
+    assets: url ? [{ video: { url } }] : [],
     ...(servicio === 'youtube' ? { metadata: { youtube: { title: titulo.slice(0, 100), categoryId: '20', privacy: 'public', madeForKids: false, notifySubscribers: true } } } : {}),
   };
   const d = await gql(MUTACION, { input });
@@ -92,6 +93,14 @@ async function estadoBuffer({ id, canal }) {
     }
   }
   return { estado: 'desconocido' };
+}
+
+// ¿Tienes X conectado en Buffer? Entonces X va por Buffer (sin el límite de 10 al mes de Upload-Post).
+export const xPorBuffer = () => bufferConfigurado() && bufferCache.canales.some((c) => SERVICIOS.twitter.includes(c.service) && !c.isDisconnected && !c.isLocked);
+// Post de solo texto en X (por ejemplo, "ya estoy en vivo").
+export async function postTextoX(texto, config) {
+  await canalesBuffer();
+  return publicarBuffer('twitter', { url: null, texto: String(texto).slice(0, 280) }, config);
 }
 
 // ---------------- Meta (Facebook e Instagram) ----------------
@@ -206,7 +215,7 @@ export function destinosListos(config) {
     (d === 'tiktok' || d === 'youtube') ? bufferConfigurado()
       : d === 'facebook' ? metaListo()
         : d === 'instagram' ? metaListo() && Boolean(meta?.igId)
-          : uploadPostConfigurado()));
+          : xPorBuffer() || uploadPostConfigurado()));
 }
 
 // Facebook acepta Reels de máximo 90 s: si el video es más largo, se hace una copia recortada.
@@ -229,13 +238,14 @@ export async function publicarEn(destino, item, { config, carpetaClips }) {
   if (destino === 'youtube') return { ...(await publicarBuffer('youtube', { url, texto, titulo: item.tituloShorts ?? item.titulo }, config)), pendiente: true };
   if (destino === 'facebook') return reelFacebook({ archivo, texto });
   if (destino === 'instagram') return reelInstagram({ url, texto });
+  if (destino === 'x' && xPorBuffer()) return { ...(await publicarBuffer('twitter', { url, texto: String(item.textoX ?? item.titulo).slice(0, 280) }, config)), pendiente: true };
   if (destino === 'x') return postX({ url, texto: item.textoX ?? item.titulo }, config);
   throw new Error('Destino desconocido: ' + destino);
 }
 
 // Para los de Buffer: confirma unos minutos después si de verdad salió.
 export async function confirmar(destino, info) {
-  if (destino !== 'tiktok' && destino !== 'youtube') return { estado: 'sent' };
+  if (!info?.canal) return { estado: 'sent' }; // solo los de Buffer se confirman
   return estadoBuffer(info);
 }
 
@@ -247,7 +257,8 @@ export async function probarServicios(config) {
       const { canales } = await canalesBuffer(true);
       const t = canalDe('tiktok', config);
       const y = canalDe('youtube', config);
-      r.push({ nombre: 'Buffer (TikTok y YouTube)', ok: Boolean(t && y), detalle: `TikTok: ${t ? t.displayName || t.name : 'falta conectar'} · YouTube: ${y ? y.displayName || y.name : 'falta conectar'} · ${canales.length} canal(es) en Buffer` });
+      const x = canalDe('twitter', config);
+      r.push({ nombre: 'Buffer (TikTok, YouTube y X)', ok: Boolean(t && y), detalle: `TikTok: ${t ? t.displayName || t.name : 'falta conectar'} · YouTube: ${y ? y.displayName || y.name : 'falta conectar'} · X: ${x ? x.displayName || x.name : 'sin conectar'} · ${canales.length} canal(es) en Buffer` });
     } catch (e) { r.push({ nombre: 'Buffer (TikTok y YouTube)', ok: false, detalle: e.message }); }
   }
   if (metaConfigurado()) {

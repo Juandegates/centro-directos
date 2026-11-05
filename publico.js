@@ -62,7 +62,7 @@ export function iniciarPublico({ puerto = 3001, alAvisoKick = null }) {
       if (alAvisoKick) return alAvisoKick(req, res);
       res.writeHead(404); res.end(); return;
     }
-    if (url.pathname === '/robots.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('User-agent: *\nAllow: /v/\n'); return; }
+    if (url.pathname === '/robots.txt') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('User-agent: facebookexternalhit\nAllow: /\n\nUser-agent: *\nAllow: /\n'); return; }
     const m = url.pathname.match(/^\/v\/([a-f0-9]{36})\//);
     if (m && (req.method === 'GET' || req.method === 'HEAD')) {
       const e = enlaces[m[1]];

@@ -277,7 +277,7 @@ $('#form-chat').addEventListener('submit', async (e) => {
 
 // ---------- piloto automático (v5) ----------
 const RED = { tiktok: 'TikTok', youtube: 'Shorts', facebook: 'Facebook', instagram: 'Instagram', x: 'X' };
-const ICONO = { pendiente: '⏳', enviado: '📤', ok: '✅', error: '❌', cancelado: '⚪' };
+const ICONO = { pendiente: '⏳', enviado: '📤', ok: '✅', error: '❌', cancelado: '⚪', dudoso: '❔' };
 async function cargarPiloto() {
   const caja = $('#piloto');
   let p;

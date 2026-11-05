@@ -130,15 +130,20 @@ export function metaGuardar(pagina) {
   return metaInfo();
 }
 
-async function reelFacebook({ url, texto }) {
+async function reelFacebook({ archivo, texto }) {
   if (!metaListo()) throw new Error('Falta conectar tu Página de Facebook (http://localhost:3000/meta en la PC)');
   const t = meta.token;
   const ini = await graph(`/${meta.paginaId}/video_reels`, { metodo: 'POST', params: { upload_phase: 'start' }, token: t });
+  // Se sube el archivo directo desde la PC (Facebook a veces se niega a descargarlo de una dirección).
+  const datos = readFileSync(archivo);
   const sub = await fetch(`https://rupload.facebook.com/video-upload/v25.0/${ini.video_id}`, {
-    method: 'POST', headers: { Authorization: `OAuth ${t}`, file_url: url }, signal: AbortSignal.timeout(120_000),
+    method: 'POST',
+    headers: { Authorization: `OAuth ${t}`, offset: '0', file_size: String(datos.length), 'Content-Type': 'application/octet-stream' },
+    body: datos,
+    signal: AbortSignal.timeout(10 * 60_000),
   });
   const s = await sub.json().catch(() => ({}));
-  if (!sub.ok || s.success === false || s.error) throw new Error(`Facebook no pudo descargar el video: ${s.error?.message ?? s.debug_info?.message ?? sub.status}`);
+  if (!sub.ok || s.success === false || s.error) throw new Error(`Facebook no aceptó el video: ${s.error?.message ?? s.debug_info?.message ?? sub.status}`);
   await graph(`/${meta.paginaId}/video_reels`, { metodo: 'POST', params: { upload_phase: 'finish', video_id: ini.video_id, video_state: 'PUBLISHED', description: texto.slice(0, 2000) }, token: t });
   return { id: ini.video_id, url: `https://www.facebook.com/reel/${ini.video_id}` };
 }
@@ -218,11 +223,11 @@ export async function publicarEn(destino, item, { config, carpetaClips }) {
   const vertical = join(carpetaClips, item.archivos.vertical);
   if (!existsSync(vertical)) throw new Error('El video ya no existe en la PC');
   const archivo = destino === 'facebook' ? await versionFacebook(config, vertical) : vertical;
-  const url = enlacePublico(archivo, 72);
+  const url = destino === 'facebook' ? null : enlacePublico(archivo, 72);
   const texto = item.textoTikTok ?? item.titulo ?? '';
   if (destino === 'tiktok') return { ...(await publicarBuffer('tiktok', { url, texto }, config)), pendiente: true };
   if (destino === 'youtube') return { ...(await publicarBuffer('youtube', { url, texto, titulo: item.tituloShorts ?? item.titulo }, config)), pendiente: true };
-  if (destino === 'facebook') return reelFacebook({ url, texto });
+  if (destino === 'facebook') return reelFacebook({ archivo, texto });
   if (destino === 'instagram') return reelInstagram({ url, texto });
   if (destino === 'x') return postX({ url, texto: item.textoX ?? item.titulo }, config);
   throw new Error('Destino desconocido: ' + destino);

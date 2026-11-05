@@ -232,7 +232,12 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     publicarAhora(item) {
       if (!cfg().activo) throw new Error('El piloto automático está apagado (config.json → autoPublicar.activo)');
       if (s.cola.some((e) => e.itemId === item.id && !e.avisado)) throw new Error('Ese video ya está en la fila para publicarse');
-      if (!encolar(item, Date.now(), { conX: usarX(), saltar: Object.keys(item.publicado ?? {}).filter((k) => item.publicado[k]) })) throw new Error('No hay redes conectadas donde falte publicarlo');
+      // Se salta toda red donde ya salió (según la bandeja Y según el historial de la cola), para no duplicar.
+      const yaSalio = new Set(Object.keys(item.publicado ?? {}).filter((k) => item.publicado[k]));
+      for (const e of s.cola.filter((x) => x.itemId === item.id)) {
+        for (const [k, d] of Object.entries(e.destinos)) if (['ok', 'enviado', 'dudoso'].includes(d.estado)) yaSalio.add(k);
+      }
+      if (!encolar(item, Date.now(), { conX: usarX() && !yaSalio.has('x'), saltar: [...yaSalio] })) throw new Error('Ya está publicado en todas tus redes conectadas');
       setTimeout(() => { tick(); }, 1000);
     },
     // Lo que viene y lo que ya salió (para la app).

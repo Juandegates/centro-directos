@@ -84,7 +84,7 @@ function irA() {
   for (const v of Object.keys(TITULOS)) $('#' + v).hidden = v !== nombre;
   document.querySelectorAll('.navegacion a').forEach((a) => a.classList.toggle('activo', a.dataset.vista === nombre));
   $('#titulo-seccion').textContent = TITULOS[nombre];
-  if (nombre === 'publicar') cargarBandeja(extra);
+  if (nombre === 'publicar') { cargarBandeja(extra); cargarPiloto(); }
   if (nombre === 'diagnostico') cargarBitacora();
   if (nombre === 'crecer') cargarCrecer();
   if (vista === 'corregir' && estado?.directo?.sugerencia) {
@@ -275,6 +275,27 @@ $('#form-chat').addEventListener('submit', async (e) => {
   } catch (err) { toast(err.message); }
 });
 
+// ---------- piloto automático (v5) ----------
+const RED = { tiktok: 'TikTok', youtube: 'Shorts', facebook: 'Facebook', instagram: 'Instagram', x: 'X' };
+const ICONO = { pendiente: '⏳', enviado: '📤', ok: '✅', error: '❌', cancelado: '⚪' };
+async function cargarPiloto() {
+  const caja = $('#piloto');
+  let p;
+  try { p = await api('/api/publicaciones'); } catch { return; }
+  if (p.sinSesion) { caja.innerHTML = '<h2>🤖 Piloto automático</h2><p class="tenue">Esperando la sesión de Twitch…</p>'; return; }
+  const redes = p.destinos.length ? p.destinos.map((d) => RED[d]).join(' · ') : 'ninguna todavía (los videos quedan aquí para subirlos tú)';
+  const espera = p.pendiente ? `<p>⏳ Claude elige los videos del último directo a las <strong>${esc(fechaCorta(p.pendiente.publicaA))}</strong> (si no vuelves a transmitir antes).</p>` : '';
+  const proximos = p.cola.filter((e) => Object.values(e.destinos).some((d) => d.estado === 'pendiente' || d.estado === 'enviado')).slice(0, 6);
+  const hechos = p.cola.filter((e) => !proximos.includes(e)).slice(-4).reverse();
+  const fila = (e) => `<li><strong>${esc(e.titulo ?? '')}</strong><div class="tenue">${esc(fechaCorta(e.cuando))} · ${Object.entries(e.destinos).map(([k, d]) => d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${ICONO[d.estado] ?? ''} ${RED[k]}</a>` : `<span title="${esc(d.error ?? '')}">${ICONO[d.estado] ?? ''} ${RED[k]}</span>`).join(' ')}</div></li>`;
+  caja.innerHTML = `<h2>🤖 Piloto automático</h2>
+    <p class="tenue">${p.activo ? 'Encendido' : 'Apagado'} · Redes conectadas: ${esc(redes)}</p>
+    <p class="tenue">Momentos guardados en este directo: ${p.candidatos} · en reserva para días sin directo: ${p.reserva}</p>
+    ${espera}
+    ${proximos.length ? `<h3>Próximas publicaciones</h3><ul class="lista-simple">${proximos.map(fila).join('')}</ul>` : ''}
+    ${hechos.length ? `<h3>Ya publicados</h3><ul class="lista-simple">${hechos.map(fila).join('')}</ul>` : ''}`;
+}
+
 // ---------- bandeja de publicaciones ----------
 const urlX = (t) => `https://x.com/intent/post?text=${encodeURIComponent(t)}`;
 async function cargarBandeja(enfocar) {
@@ -312,9 +333,11 @@ async function cargarBandeja(enfocar) {
           <a class="boton" href="${esc(urlX(i.textoX))}" target="_blank" rel="noopener">Publicar en X</a>
           ${i.archivos.horizontal ? `<a class="boton" href="/media/${esc(i.archivos.horizontal)}" download="clip-${esc(i.id)}-horizontal.mp4">⬇ Horizontal</a>` : ''}
           ${i.twitch?.url ? `<a class="boton" href="${esc(i.twitch.url)}" target="_blank" rel="noopener">Clip en Twitch</a>` : ''}
+          <button data-publicar="${esc(i.id)}">📤 Publicar ya en mis redes</button>
           <button data-borrar="${esc(i.id)}">Borrar</button>
         </div>
-        <div class="marcas">${['tiktok', 'youtube', 'x'].map((p) => `<label><input type="checkbox" data-marcar="${esc(i.id)}" data-plat="${p}" ${i.publicado?.[p] ? 'checked' : ''}>${{ tiktok: 'TikTok', youtube: 'Shorts', x: 'X' }[p]}</label>`).join('')}</div>
+        ${i.porque ? `<div class="tenue">🤖 Por qué lo eligió Claude: ${esc(i.porque)}</div>` : ''}
+        <div class="marcas">${['tiktok', 'youtube', 'facebook', 'instagram', 'x'].map((p) => `<label><input type="checkbox" data-marcar="${esc(i.id)}" data-plat="${p}" ${i.publicado?.[p] ? 'checked' : ''}>${RED[p]}</label>`).join('')}</div>
       </article>`;
     }
     return `<article class="item ${hecho ? 'hecho' : ''}" id="item-${esc(i.id)}">
@@ -340,6 +363,12 @@ async function cargarBandeja(enfocar) {
     };
   });
   cont.querySelectorAll('[data-frase-ia]').forEach((b) => { b.onclick = () => cambiarFrase(b.dataset.fraseIa, ''); });
+  cont.querySelectorAll('[data-publicar]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try { const r = await api('/api/publicar', { cuerpo: { id: b.dataset.publicar } }); toast(r.mensaje); cargarPiloto(); } catch (e) { toast(e.message); b.disabled = false; }
+    };
+  });
   cont.querySelectorAll('[data-borrar]').forEach((b) => { b.onclick = async () => { await api('/api/bandeja/' + b.dataset.borrar, { cuerpo: { borrar: true } }); cargarBandeja(null); }; });
   cont.querySelectorAll('[data-marcar]').forEach((c) => { c.onchange = async () => { await api('/api/bandeja/' + c.dataset.marcar, { cuerpo: { publicado: { [c.dataset.plat]: c.checked } } }); cargarBandeja(null); }; });
   if (enfocar) document.getElementById('item-' + enfocar)?.scrollIntoView({ behavior: 'smooth' });
@@ -515,6 +544,7 @@ async function arrancar() {
   setInterval(refrescarEstado, 4000);
   setInterval(refrescarChat, 2000);
   setInterval(() => cargarBandeja(null), 20000);
+  setInterval(() => { if (!$('#publicar').hidden) cargarPiloto(); }, 30000);
   cargarCrecer();
   setInterval(cargarCrecer, 30000);
 }

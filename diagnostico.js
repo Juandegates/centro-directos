@@ -8,6 +8,12 @@ import { buscar, buscadorConfigurado, usadasEsteMes } from './buscador.js';
 import * as twitch from './twitch.js';
 import * as youtube from './youtube.js';
 import * as kick from './kick.js';
+import { preguntarClaude, claudeDisponible } from './claude.js';
+import { probarServicios } from './publicar.js';
+import { urlBase } from './publico.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as unir } from 'node:path';
 import { avisar } from './avisos.js';
 import { limpiar } from './estado.js';
 
@@ -69,6 +75,27 @@ export async function probarTodo({ leerConfig, canalId }) {
       return `Canal kick.com/${c.slug} · clave de transmisión lista`;
     }));
   }
+  // v5: Claude (con tu plan Max) para elegir y revisar los videos.
+  resultados.push(await prueba('Claude (elige y revisa videos)', async () => {
+    if (!claudeDisponible(config)) throw new Error('No encontré Claude Code en esta PC. Instálalo (el mismo de MythForge) e inicia sesión con "claude"');
+    const carpeta = mkdtempSync(unir(tmpdir(), 'centro-claude-'));
+    try {
+      const r = await preguntarClaude({ prompt: 'Responde SOLO con este JSON exacto: {"ok": true}', carpeta, config, minutos: 3 });
+      if (r.ok !== true) throw new Error('Respuesta rara: ' + JSON.stringify(r).slice(0, 100));
+      return 'Respondió bien (usa tu plan Max)';
+    } finally { rmSync(carpeta, { recursive: true, force: true }); }
+  }));
+  // v5: redes para publicar solo, y la dirección pública por donde descargan los videos.
+  for (const s of await probarServicios(config)) {
+    resultados.push(await prueba(s.nombre, async () => { if (!s.ok) throw new Error(s.detalle); return s.detalle; }));
+  }
+  resultados.push(await prueba('Dirección pública (Funnel) para los videos', async () => {
+    const b = urlBase();
+    if (!b) throw new Error('Sin dirección: revisa que Tailscale esté abierto y que Funnel esté activo (tailscale funnel --bg --https=8443 3001)');
+    const r = await fetch(b + '/robots.txt', { signal: AbortSignal.timeout(15_000) });
+    if (!r.ok) throw new Error(`Funnel respondió ${r.status}`);
+    return b;
+  }));
   // Cada IA de la nube por separado, para saber cuáles funcionan.
   for (const p of iasConfiguradas()) {
     const nombre = { gemini: 'Gemini', mistral: 'Mistral', groq: 'Groq' }[p];

@@ -2,7 +2,6 @@
 // y los avisos de mensajes nuevos del chat (webhooks oficiales de Kick, firmados).
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { randomBytes, createHash, verify } from 'node:crypto';
-import { createServer } from 'node:http';
 import { marcar, log } from './estado.js';
 
 const ARCHIVO_TOKENS = new URL('./kick-tokens.json', import.meta.url);
@@ -161,10 +160,10 @@ export function firmaValida({ id, hora, cuerpo, firma }, pem) {
 // Limpia los emotes de Kick: "[emote:123:Jaja]" → "Jaja".
 export const limpiarTexto = (t) => String(t ?? '').replace(/\[emote:\d+:([^\]]+)\]/g, '$1').replace(/\s+/g, ' ').trim();
 
-export function escucharAvisos({ puerto = 3001, alMensaje }) {
+// Devuelve la función que atiende los avisos de Kick (la usa el servidor público del puerto 3001).
+export function manejadorAvisos({ alMensaje }) {
   const vistos = new Set();
-  const servidor = createServer((req, res) => {
-    if (req.method !== 'POST') { res.writeHead(200); res.end('Centro de Directos · Kick'); return; }
+  return (req, res) => {
     const trozos = [];
     let largo = 0;
     req.on('data', (c) => { largo += c.length; if (largo > 256 * 1024) req.destroy(); else trozos.push(c); });
@@ -182,8 +181,5 @@ export function escucharAvisos({ puerto = 3001, alMensaje }) {
       if (h['kick-event-type'] !== 'chat.message.sent') return;
       try { alMensaje(JSON.parse(cuerpo.toString('utf8'))); } catch (e) { log('⚠️ Aviso de Kick ilegible: ' + e.message, { nivel: 'aviso' }); }
     });
-  });
-  servidor.on('error', (e) => marcar('chatKick', 'error', `No pude abrir el puerto ${puerto} para los avisos de Kick`, e.message));
-  servidor.listen(puerto, '0.0.0.0');
-  return servidor;
+  };
 }

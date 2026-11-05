@@ -1,5 +1,5 @@
 // Estado central del Centro: semáforo por parte, bitácora de eventos y reporte de diagnóstico.
-import { readFileSync } from 'node:fs';
+import { readFileSync, appendFileSync, mkdirSync, statSync, copyFileSync, writeFileSync } from 'node:fs';
 import { release, totalmem, freemem, cpus } from 'node:os';
 import { ajustes } from './ajustes.js';
 
@@ -20,6 +20,8 @@ export const PARTES = {
   iaLocal: 'IA de respaldo (PC)',
   captura: 'Vista de pantalla',
   clips: 'Clips',
+  claude: 'Claude (elige y revisa videos)',
+  publicar: 'Publicación automática',
   avisos: 'Avisos al celular',
   internet: 'Internet de la PC',
 };
@@ -30,8 +32,20 @@ const oyentes = new Set();
 
 const hora = () => new Date().toLocaleTimeString('es-MX', { hour12: false });
 
+// La bitácora también se guarda en logs/centro.log (para verla con el acceso directo del escritorio).
+const LOG = new URL('./logs/centro.log', import.meta.url);
+try { mkdirSync(new URL('./logs/', import.meta.url), { recursive: true }); } catch { /* sin permiso */ }
+function aArchivo(linea) {
+  try {
+    // Se copia y se vacía (no se renombra): así funciona aunque la ventana de la bitácora esté abierta.
+    if (statSync(LOG).size > 5 * 1024 ** 2) { copyFileSync(LOG, new URL('./logs/centro-anterior.log', import.meta.url)); writeFileSync(LOG, ''); }
+  } catch { /* todavía no existe */ }
+  try { appendFileSync(LOG, linea + '\n'); } catch { /* disco lleno o en uso */ }
+}
+
 export function log(texto, { parte = null, nivel = 'info', detalle = null } = {}) {
   console.log(`[${hora()}] ${texto}`);
+  aArchivo(`[${new Date().toLocaleString('es-MX', { hour12: false })}] ${limpiar(texto)}`);
   bitacora.push({ hora: new Date().toISOString(), nivel, parte, texto, detalle: detalle ? String(detalle).slice(0, 2000) : null });
   if (bitacora.length > 300) bitacora.shift();
 }
@@ -60,7 +74,7 @@ export const verPartes = () => Object.entries(partes).map(([id, p]) => ({ id, no
 export const verBitacora = (n = 100) => bitacora.slice(-n);
 
 // Quita cualquier clave secreta de un texto antes de mostrarlo o copiarlo.
-const SECRETOS = ['GEMINI_API_KEY', 'MISTRAL_API_KEY', 'GROQ_API_KEY', 'TAVILY_API_KEY', 'TWITCH_CLIENT_SECRET', 'GOOGLE_CLIENT_SECRET', 'KICK_CLIENT_SECRET', 'KICK_STREAM_KEY', 'APP_PIN', 'GITHUB_TOKEN'];
+const SECRETOS = ['GEMINI_API_KEY', 'MISTRAL_API_KEY', 'GROQ_API_KEY', 'TAVILY_API_KEY', 'TWITCH_CLIENT_SECRET', 'GOOGLE_CLIENT_SECRET', 'KICK_CLIENT_SECRET', 'KICK_STREAM_KEY', 'BUFFER_API_KEY', 'UPLOADPOST_API_KEY', 'META_APP_SECRET', 'APP_PIN', 'GITHUB_TOKEN'];
 export function limpiar(texto) {
   let t = String(texto ?? '');
   for (const k of SECRETOS) {

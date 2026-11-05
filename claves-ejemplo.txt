@@ -31,6 +31,15 @@ KICK_STREAM_KEY=pega_aqui_la_stream_key_de_kick
 KICK_CLIENT_ID=pega_aqui_tu_client_id_de_kick
 KICK_CLIENT_SECRET=pega_aqui_tu_client_secret_de_kick
 
+# --- Publicación automática (v5, opcional) ---
+# Buffer (TikTok y YouTube Shorts): publish.buffer.com/settings/api
+BUFFER_API_KEY=pega_aqui_tu_clave_de_buffer
+# Upload-Post (X): app.upload-post.com → API Keys
+UPLOADPOST_API_KEY=pega_aqui_tu_clave_de_upload_post
+# Meta (Facebook e Instagram): developers.facebook.com → tu app → Configuración → Básica
+META_APP_ID=pega_aqui_el_id_de_tu_app_de_meta
+META_APP_SECRET=pega_aqui_la_clave_secreta_de_tu_app_de_meta
+
 # --- App del celular: PIN para entrar (si lo dejas así, el Centro inventa uno y lo muestra) ---
 APP_PIN=pega_aqui_un_pin
 

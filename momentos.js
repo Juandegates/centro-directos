@@ -73,6 +73,8 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
     activo: true, dbSobreNormal: 6, puntosParaClip: 7, minutosEntreClips: 8, maxPorDirecto: 6, minutosRevision: 12,
     segundosRevisionJefe: 120, minutosSinVerJefe: 20, minutosMejorMomento: 30, minimoMejorMomento: 7,
     ...(leerConfig().momentos ?? {}),
+    // v5 (piloto automático): se guardan más candidatos porque Claude elige al final los mejores.
+    ...(leerConfig().autoPublicar?.activo !== false ? { puntosParaClip: 6, maxPorDirecto: 30, minutosEntreClips: 3, minimoMejorMomento: 5 } : {}),
   });
   const MUERTE = /muer[eit]|muerte|derrot|game ?over|ca[ií]d[oa]|perdi[oó]|reaparec/i;
   let destacados = []; // lo más fuerte del directo (por ejemplo, jefes vencidos), para el título del resumen

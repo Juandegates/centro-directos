@@ -1,4 +1,4 @@
-# Centro de Directos · v2
+# Centro de Directos · v5
 
 Todo automático para tus directos de PS5: tú solo le das **Transmitir** en la PS5 y la PC hace lo demás.
 
@@ -12,6 +12,19 @@ Todo automático para tus directos de PS5: tú solo le das **Transmitir** en la 
 - **Aprende solo**: juego y título de Twitch, tu horario y notas de tu partida; te avisa si la categoría no coincide con lo que se ve.
 - **Avisos al celular** (ntfy) de todo lo importante y de cualquier falla.
 - **IA de respaldo** en tu PC (Ollama), opcional, si Gemini se satura.
+
+## Piloto automático de publicaciones (v5)
+
+- Durante el directo solo se guardan **candidatos** (momentos prometedores de ~1 min).
+- 1 hora después de terminar (si no te reconectas antes), **Claude** (Claude Code con tu plan Max) ve todos los candidatos, elige los **3 mejores**, escribe sus textos viendo lo que pasa y revisa cada video final.
+- Se publican espaciados (el 1º de inmediato y los demás cada 3 h) junto con el **resumen de 1:30**: TikTok y YouTube Shorts por **Buffer**, Facebook e Instagram por tu **app de Meta**, y X por **Upload-Post** (10 al mes: el mejor de cada directo).
+- Días sin directo: a las 6 pm sale un **video gancho** con lo mejor guardado.
+- Los servicios descargan cada video de una dirección temporal en tu PC (Tailscale Funnel, puerto 3001).
+- Ajustes en `config.json` → `autoPublicar`.
+
+## Segundo plano (v5)
+
+`instalar-v5.bat` mueve el Centro a `C:\CentroDirectos`, lo deja arrancando **sin ventana** al entrar a Windows y pone en el escritorio: **Centro de Directos** (bitácora en vivo), **Reiniciar Centro** y **Detener Centro**.
 
 ## App del celular
 

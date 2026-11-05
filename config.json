@@ -80,5 +80,29 @@
   "resumen": {
     "activo": true,
     "segundos": 90
+  },
+  "autoPublicar": {
+    "activo": true,
+    "minutosDespues": 60,
+    "horasEntre": 3,
+    "clipsPorDirecto": 3,
+    "resumen": true,
+    "horaGancho": "18:00",
+    "maxXMes": 10,
+    "revisionFinal": true,
+    "destinos": {
+      "tiktok": true,
+      "youtube": true,
+      "facebook": true,
+      "instagram": true,
+      "x": true
+    },
+    "buffer": {
+      "tiktok": "juandegamers",
+      "youtube": "JuandeGamer"
+    },
+    "uploadPost": {
+      "usuario": "juandegamers"
+    }
   }
 }

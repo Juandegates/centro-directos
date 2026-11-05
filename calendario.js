@@ -63,8 +63,10 @@ export function crearCalendario({ leerConfig, avisar, urlApp, enVivo = () => fal
     }
   }
 
-  setInterval(() => { revisar().catch(() => {}); }, 60_000);
-  setInterval(() => { if (!enVivo()) programar(); }, 30 * 60_000);
+  // v5: con el piloto automático, el Centro publica solo y este calendario de avisos no hace falta.
+  const piloto = () => leerConfig().autoPublicar?.activo !== false;
+  setInterval(() => { if (!piloto()) revisar().catch(() => {}); }, 60_000);
+  setInterval(() => { if (!enVivo() && !piloto()) programar(); }, 30 * 60_000);
 
   return {
     programar,

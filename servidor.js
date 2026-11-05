@@ -28,7 +28,11 @@ function autorizado(req) {
 const leerCuerpo = (req) => new Promise((ok) => {
   let d = '';
   req.on('data', (c) => { d += c; if (d.length > 1e6) req.destroy(); });
-  req.on('end', () => { try { ok(d ? JSON.parse(d) : {}); } catch { ok({}); } });
+  req.on('end', () => {
+    // Formularios de las páginas de la PC (por ejemplo, conectar Facebook) llegan como "a=1&b=2".
+    if (/x-www-form-urlencoded/.test(req.headers['content-type'] ?? '')) return ok(Object.fromEntries(new URLSearchParams(d)));
+    try { ok(d ? JSON.parse(d) : {}); } catch { ok({}); }
+  });
 });
 
 function servirArchivo(req, res, ruta) {
@@ -64,7 +68,7 @@ export function iniciarServidor({ pin, rutas, paginasLocales }) {
       const local = paginasLocales[url.pathname];
       if (local) {
         if (!esLocal(req)) return html('Esta página solo se abre en el navegador de la PC.');
-        const r = await local({ url });
+        const r = await local({ url, req, cuerpo: req.method === 'POST' ? await leerCuerpo(req) : {} });
         if (r.redirigir) { res.writeHead(302, { Location: r.redirigir }); return res.end(); }
         return html(r.html);
       }

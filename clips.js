@@ -68,9 +68,12 @@ export function lineaCuentas(config, canalLogin) {
   return partes.length ? `🎮 En vivo en ${partes.join(' y ')}` : '';
 }
 
-export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar, urlApp, canalLogin = '', alClipListo = () => {} }) {
+export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar, urlApp, canalLogin = '', alClipListo = () => {}, candidatos = null }) {
+  // v5: con el piloto automático, durante el directo solo se guardan candidatos (Claude elige al final).
+  const modoCandidatos = () => Boolean(candidatos) && leerConfig().autoPublicar?.activo !== false;
   const mensajes = []; // { hora, reaccion, linea }
   let ultimoClip = 0;
+  let ultimoCandidato = 0;
   let trabajando = false;
 
   // Llamar con cada mensaje de la gente (de cualquier plataforma).
@@ -98,6 +101,13 @@ export function crearClips({ captura, leerConfig, datos, crearClipTwitch, avisar
   // rango: { desde, hasta } en ms para armar el clip de un momento ya pasado (por ejemplo, el final de un jefe).
   async function crear(motivo, { puntos = null, que = '', saltarEspera = false, segundos = null, rango = null, fotosMomento = null } = {}) {
     const c = leerConfig().clips ?? {};
+    if (modoCandidatos() && motivo !== 'manual') {
+      if (!saltarEspera && Date.now() - ultimoCandidato < 60_000) return null; // el chat "explotando" no guarda 10 iguales
+      ultimoCandidato = Date.now();
+      // El chat pidiendo clip o explotando vale mucho: es lo que la gente quiso ver.
+      const valor = puntos ?? (/chat/.test(motivo) ? 8 : 6);
+      return candidatos.agregarCandidato({ motivo, puntos: valor, que, rango });
+    }
     if (trabajando || !captura.activa()) return null;
     if (Date.now() - ultimoClip < (c.minutosEntreClips ?? 3) * 60_000 && motivo !== 'manual' && !saltarEspera) return null;
     trabajando = true;

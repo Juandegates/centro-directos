@@ -26,6 +26,11 @@ import * as bandeja from './bandeja.js';
 import * as twitch from './twitch.js';
 import * as youtube from './youtube.js';
 import * as kick from './kick.js';
+import { crearCandidatos } from './candidatos.js';
+import { crearAutopublicar } from './autopublicar.js';
+import { iniciarPublico, configurarBase, urlBase } from './publico.js';
+import { metaConfigurado, metaPaginas, metaGuardar, metaInfo, destinosListos } from './publicar.js';
+import { writeFileSync as escribirArchivo } from 'node:fs';
 
 console.log(`\n=== Centro de Directos · v${VERSION} ===\n`);
 alAvisoIA((t) => log(t));
@@ -63,6 +68,17 @@ const PIN = process.env.APP_PIN && !process.env.APP_PIN.startsWith('pega_aqui') 
 // Dirección de la app para los avisos: la de Tailscale si está instalado (funciona fuera de casa).
 let urlDetectada = `http://${hostname().toLowerCase()}:3000`;
 let nombreTailscale = ''; // p. ej. tu-pc.tail1234.ts.net (para la dirección pública de los avisos de Kick)
+// En "tailscale funnel status", ¿hay un bloque https://<pc> (sin :puerto) que mande al 3001?
+export function funnelEn443(texto, nombre) {
+  let bloque = null;
+  for (const linea of String(texto).split(/\r?\n/)) {
+    const m = linea.match(/^https:\/\/(\S+?)\/?(\s|$)/);
+    if (m) { bloque = m[1] === nombre; continue; }
+    if (bloque && /127\.0\.0\.1:3001|localhost:3001/.test(linea)) return true;
+  }
+  return false;
+}
+let funnel443 = false; // ¿Funnel también está en el puerto normal (443)? Algunos servicios lo prefieren
 function detectarUrl() {
   for (const exe of ['tailscale', 'C:\\Program Files\\Tailscale\\tailscale.exe']) {
     const r = spawnSync(exe, ['status', '--json'], { windowsHide: true, timeout: 8000 });
@@ -72,6 +88,8 @@ function detectarUrl() {
       const nombre = (yo?.DNSName ?? '').replace(/\.$/, '');
       nombreTailscale = nombre;
       const servido = spawnSync(exe, ['serve', 'status'], { windowsHide: true, timeout: 8000 }).stdout?.toString() ?? '';
+      const funnel = spawnSync(exe, ['funnel', 'status'], { windowsHide: true, timeout: 8000 }).stdout?.toString() ?? '';
+      funnel443 = funnelEn443(funnel, nombre);
       if (nombre && /3000/.test(servido)) urlDetectada = `https://${nombre}`;
       else if (yo?.TailscaleIPs?.[0]) urlDetectada = `http://${yo.TailscaleIPs[0]}:3000`;
     } catch { /* sin Tailscale */ }
@@ -343,6 +361,7 @@ async function alEmpezar() {
   if (reanudar) {
     log('🔄 El Centro se reinició a media transmisión: retomo todo sin repetir anuncios');
     ctx.momentos.retomar();
+    ctx.auto.alReanudar();
     ctx.captura.iniciar();
     await iniciarYoutube({ reanudar: true });
     iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message));
@@ -356,7 +375,9 @@ async function alEmpezar() {
   }
   ctx.bots.twitch.nuevoDirecto();
   ctx.bots.youtube.nuevoDirecto();
-  ctx.momentos.nuevoDirecto();
+  // v5: si te reconectas antes de que se publique lo del directo anterior, es el mismo directo.
+  const continuar = ctx.auto.activo() ? ctx.auto.alEmpezar() : false;
+  if (!continuar) ctx.momentos.nuevoDirecto();
   ctx.captura.iniciar();
   ctx.crecer.alEmpezar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
   ctx.bots.kick.nuevoDirecto();
@@ -385,9 +406,10 @@ async function alTerminar() {
   avisar('⚫ Terminó tu directo', `Duró ${minutos} min. Preparando el resumen…`, { etiquetas: ['black_circle'], clave: 'fin', cadaMinutos: 30 });
   await ctx.crecer.alTerminar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
   if (minutos >= 5) ctx.promos.alTerminar({ minutos }).catch(() => {});
-  // A los 3 min (cuando ya terminaron los últimos clips): video resumen con lo mejor del directo,
-  // y luego los clips de hoy se reparten en los próximos días (los mejores primero).
-  setTimeout(async () => {
+  // v5: en 1 hora (si no vuelves a transmitir), Claude elige los mejores momentos y se publican solos.
+  if (ctx.auto.activo()) ctx.auto.alTerminar({ minutos });
+  // Sin piloto automático: a los 3 min el video resumen, y los clips se reparten en los próximos días.
+  else setTimeout(async () => {
     if (minutos >= 10) await ctx.resumen.armar({ minutos }).catch((e) => log('No pude armar el video resumen: ' + e.message, { nivel: 'aviso' }));
     ctx.calendario.programar();
     ctx.calendario.revisar().catch(() => {});
@@ -440,7 +462,12 @@ async function iniciar() {
       enviar: async (texto) => { if (kk.activo && kick.tieneSesion()) await kick.enviarChat((await canalKick()).id, texto); },
     }),
   };
+  ctx.candidatos = crearCandidatos({
+    captura: ctx.captura, leerConfig, datos: ctx.datos, canalLogin: canal.login,
+    momentos: { piezas: () => ctx.momentos.piezas(), destacados: () => ctx.momentos.destacados() },
+  });
   ctx.clips = crearClips({
+    candidatos: ctx.candidatos,
     captura: ctx.captura, leerConfig, datos: ctx.datos, avisar, urlApp,
     crearClipTwitch: () => twitch.crearClip(canal.id), canalLogin: canal.login,
   });
@@ -450,6 +477,9 @@ async function iniciar() {
   ctx.editor = crearEditor({ leerConfig, clips: ctx.clips, avisar, urlApp, canalLogin: canal.login });
   ctx.resumen = crearResumen({ leerConfig, datos: ctx.datos, avisar, urlApp, canalLogin: canal.login, momentos: ctx.momentos });
   ctx.promos = crearPromos({ datos: ctx.datos, avisar, urlApp, urlTwitch: () => `https://twitch.tv/${canal.login}` });
+  ctx.auto = crearAutopublicar({ leerConfig, candidatos: ctx.candidatos, resumen: ctx.resumen, avisar, urlApp, enVivo: () => ctx.datos.actual().enVivo });
+  // Si el Centro se reinició mientras esperaba para publicar, recupera los pedacitos del resumen.
+  if (ctx.auto.hayPendiente()) ctx.momentos.retomar();
 
   twitch.escucharEventos({
     canalId: canal.id,
@@ -491,6 +521,8 @@ function alMensajeKick(ev) {
 }
 
 // ---------- Rutas de la app ----------
+const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+let metaUltimas = null; // Páginas encontradas al conectar Meta (solo un momento, en memoria)
 const necesitaCtx = () => { if (!ctx) throw new Error('El Centro todavía no inicia sesión en Twitch'); };
 
 const rutas = {
@@ -557,6 +589,18 @@ const rutas = {
     return { ok: true };
   },
   'GET /api/bandeja': () => bandeja.lista(),
+  // v5: lo que viene (cola de publicaciones) y qué redes están conectadas.
+  'GET /api/publicaciones': () => {
+    if (!ctx) return { sinSesion: true };
+    return { cola: ctx.auto.cola(), pendiente: ctx.auto.pendiente(), destinos: destinosListos(leerConfig()), candidatos: ctx.candidatos.cuantos(), reserva: ctx.candidatos.reserva(), activo: ctx.auto.activo() };
+  },
+  'POST /api/publicar': ({ cuerpo }) => {
+    necesitaCtx();
+    const item = bandeja.lista().find((x) => x.id === cuerpo.id);
+    if (!item || item.tipo !== 'clip') throw new Error('No encontré ese video');
+    ctx.auto.publicarAhora(item);
+    return { ok: true, mensaje: 'Listo: se está publicando en tus redes. Te aviso cuando termine.' };
+  },
   'POST /api/bandeja/*': ({ url, cuerpo }) => {
     const id = url.pathname.split('/').pop();
     if (cuerpo.borrar) { bandeja.quitar(id); return { ok: true }; }
@@ -650,6 +694,30 @@ const paginasLocales = {
   '/youtube': () => (youtube.configurado()
     ? { redirigir: youtube.urlLogin() }
     : { html: '❌ Primero pon GOOGLE_CLIENT_ID y GOOGLE_CLIENT_SECRET en claves.txt y reinicia el Centro.' }),
+  // Conectar tu Página de Facebook (y su Instagram) para publicar Reels solo. El token se pega aquí, en la PC.
+  '/meta': async ({ req, cuerpo }) => {
+    if (!metaConfigurado()) return { html: '❌ Primero pon META_APP_ID y META_APP_SECRET en claves.txt y reinicia el Centro.' };
+    // Solo formularios enviados desde esta misma página (ninguna otra web puede mandarlos por ti).
+    const sitio = req.headers['sec-fetch-site'];
+    if (req.method === 'POST' && sitio && !['same-origin', 'none'].includes(sitio)) return { html: '❌ Petición rechazada.' };
+    if (req.method === 'POST' && cuerpo.pagina) {
+      const pagina = (metaUltimas ?? []).find((p) => p.id === cuerpo.pagina);
+      if (!pagina) return { html: '❌ Se perdió la lista de Páginas; vuelve a abrir http://localhost:3000/meta.' };
+      const info = metaGuardar(pagina);
+      metaUltimas = null;
+      marcar('publicar', 'ok', `Listo para publicar en: ${destinosListos(leerConfig()).join(', ')}`);
+      return { html: `✅ Listo: publicaré en la Página <b>${info.pagina}</b>${info.instagram ? ` y en Instagram <b>@${info.instagram}</b>` : ' (sin Instagram: vincúlalo a la Página y repite este paso)'}. Puedes cerrar esta pestaña.` };
+    }
+    if (req.method === 'POST' && cuerpo.token) {
+      metaUltimas = await metaPaginas(String(cuerpo.token));
+      if (!metaUltimas.length) return { html: '❌ Ese token no tiene Páginas. Revisa que hayas elegido la Página al generar el token.' };
+      return { html: `<h3>¿Cuál es la Página de tus directos?</h3><form method="post">${metaUltimas.map((p, i) => `<label style="display:block;margin:12px 0"><input type="radio" name="pagina" value="${esc(p.id)}" ${i ? '' : 'checked'}> <b>${esc(p.nombre)}</b> ${p.ig ? `· Instagram @${esc(p.ig.username)}` : '· (sin Instagram vinculado)'}</label>`).join('')}<button style="font-size:19px;padding:10px 20px">Usar esta Página</button></form>` };
+    }
+    const actual = metaInfo();
+    return { html: `<h3>Conectar Facebook e Instagram de los directos</h3>${actual ? `<p>Ahora: Página <b>${actual.pagina}</b>${actual.instagram ? ` · Instagram @${actual.instagram}` : ''}</p>` : ''}
+<p>Pega aquí el token que generaste en el Explorador de la API de Meta (empieza con EAA…). No se muestra a nadie: se queda en tu PC.</p>
+<form method="post"><input name="token" type="password" style="width:100%;font-size:18px;padding:10px" autocomplete="off"><br><br><button style="font-size:19px;padding:10px 20px">Conectar</button></form>` };
+  },
   '/kick/ayuda': () => ({ html: `<h3>Kick · direcciones para tu app de desarrollador</h3>
 <p><b>Redirect URL:</b> <code>${kick.URL_CALLBACK}</code></p>
 <p><b>Webhook URL:</b> <code>${urlAvisosKick()}</code></p>
@@ -690,15 +758,32 @@ if (kick.envioConfigurado()) marcar('envioKick', 'apagado', 'Arranca solo cuando
 else marcar('envioKick', 'apagado', 'Sin configurar');
 if (!kick.configurado()) marcar('kick', 'apagado', 'Sin configurar');
 else if (!kick.tieneSesion()) marcar('kick', 'aviso', 'Falta autorizar Kick: abre http://localhost:3000/kick en la PC');
-if (kick.configurado()) kick.escucharAvisos({ puerto: PUERTO_AVISOS_KICK(), alMensaje: alMensajeKick });
+// Puerto 3001 (público por Funnel): avisos de Kick y videos para que Buffer/Meta/Upload-Post los descarguen.
+configurarBase(() => leerConfig().autoPublicar?.urlPublica || (nombreTailscale ? `https://${nombreTailscale}${funnel443 ? '' : ':8443'}` : ''));
+iniciarPublico({ puerto: PUERTO_AVISOS_KICK(), alAvisoKick: kick.configurado() ? kick.manejadorAvisos({ alMensaje: alMensajeKick }) : null });
+if (destinosListos(leerConfig()).length) marcar('publicar', 'ok', `Listo para publicar en: ${destinosListos(leerConfig()).join(', ')}`);
+else marcar('publicar', 'apagado', 'Sin redes conectadas (los videos quedan en Publicar para subirlos tú)');
 if (leerConfig().iaLocal?.activa) marcar('iaLocal', 'aviso', 'Lista para entrar si Gemini falla');
 else marcar('iaLocal', 'apagado', 'Desactivada');
 
+// Si la PC arranca sin internet (apagón, Tailscale reacomodándose), reintenta solo hasta lograrlo.
+let intentosInicio = 0;
+function iniciarConReintento() {
+  iniciar().catch((e) => {
+    intentosInicio++;
+    const seg = Math.min(300, 15 * intentosInicio);
+    marcar('twitch', 'error', `No pude iniciar con Twitch; reintento en ${seg} s`, e.message);
+    if (!ctx) setTimeout(iniciarConReintento, seg * 1000);
+  });
+}
 if (twitch.tieneSesion()) {
-  iniciar().catch((e) => marcar('twitch', 'error', 'No pude iniciar con Twitch', e.message));
+  iniciarConReintento();
 } else {
   marcar('twitch', 'aviso', 'Primera vez: abre http://localhost:3000/twitch en el navegador de esta PC');
 }
+
+// Para los accesos directos del escritorio (Reiniciar / Detener).
+try { escribirArchivo(new URL('./centro.pid', import.meta.url), String(process.pid)); } catch { /* sin permiso: no pasa nada */ }
 
 process.on('unhandledRejection', (e) => log('⚠️ Error no esperado: ' + (e?.message ?? e), { nivel: 'error', detalle: e?.stack }));
 process.on('uncaughtException', (e) => log('⚠️ Error no esperado: ' + e.message, { nivel: 'error', detalle: e.stack }));

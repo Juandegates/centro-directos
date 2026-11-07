@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { golpe } from './red.js';
 
 export function rutaFfmpeg(config) {
   if (config.herramientas?.ffmpeg) return config.herramientas.ffmpeg;
@@ -13,32 +14,111 @@ export function rutaFfmpeg(config) {
 
 export const rutaStreamlink = (config) => config.herramientas?.streamlink || 'streamlink';
 
-// Lanza streamlink → ffmpeg con los argumentos de salida dados. Devuelve { procesos, ffmpeg }.
-export function lanzarDesdeTwitch({ config, canal, calidad = 'best', argsSalida, alError, alTerminar }) {
-  const fuente = spawn(rutaStreamlink(config), ['--stdout', '--twitch-disable-ads', '--loglevel', 'error',
-    '--stream-segment-attempts', '5', `https://twitch.tv/${canal}`, calidad], { windowsHide: true });
-  const ff = spawn(rutaFfmpeg(config), ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', ...argsSalida], { windowsHide: true });
-  fuente.stdout.pipe(ff.stdin);
-  ff.stdin.on('error', () => {});
-  fuente.stdout.on('error', () => {});
+// ---------- Una sola descarga de tu directo de Twitch, repartida a todos ----------
+// Antes cada parte (grabación, YouTube, Kick) bajaba su propia copia del directo: 3 descargas a la vez
+// saturaban el Wi-Fi. Ahora Streamlink baja UNA copia y el Centro se la reparte a cada FFmpeg.
+const fuentes = new Map(); // "canal|calidad" → fuente compartida
 
-  let errores = '';
-  for (const p of [fuente, ff]) {
-    p.on('error', (e) => alError?.(`No pude abrir ${p === fuente ? 'Streamlink' : 'FFmpeg'} (${e.code})`, e.code));
-    p.stderr.on('data', (d) => { errores = (errores + d.toString()).slice(-1500); });
+// Paquetes de video MPEG-TS (188 bytes). Alguien nuevo se engancha justo en el inicio de un tramo:
+// la tabla "PAT" seguida de una imagen completa (cuadro clave), para que no salga imagen rota al empezar.
+const esPaquete = (b, i) => b[i] === 0x47 && (i + 188 >= b.length || b[i + 188] === 0x47);
+const esPAT = (b, i) => esPaquete(b, i) && (b[i + 1] & 0x40) && (((b[i + 1] & 0x1f) << 8) | b[i + 2]) === 0;
+const esCuadroClave = (b, i) => esPaquete(b, i) && (b[i + 1] & 0x40) && (b[i + 3] & 0x20) && b[i + 4] > 0 && (b[i + 5] & 0x40);
+
+function inicioDeTramo(b, cualquierPAT = false) {
+  let pat = -1;
+  for (let i = 0; i + 6 < b.length; i++) {
+    if (b[i] !== 0x47) continue;
+    if (esPAT(b, i)) { if (cualquierPAT) return i; pat = i; i += 187; continue; }
+    if (pat >= 0 && esCuadroClave(b, i)) return pat;
+    if (esPaquete(b, i)) i += 187;
   }
+  return -1;
+}
+
+function soltar(f, cliente) {
+  f.clientes.delete(cliente);
+  if (f.clientes.size || f.cerrada) return;
+  // Nadie la usa: se apaga en 20 s (si alguien se reconecta antes, la reaprovecha sin volver a descargar).
+  clearTimeout(f.apagar);
+  f.apagar = setTimeout(() => { if (!f.clientes.size) { f.porNosotros = true; f.proc.kill(); } }, 20_000);
+}
+
+function fuenteCompartida(config, canal, calidad) {
+  const clave = `${canal}|${calidad}`;
+  const viva = fuentes.get(clave);
+  if (viva && !viva.cerrada) { clearTimeout(viva.apagar); return viva; }
+  const f = { clientes: new Set(), errores: '', cerrada: false, porNosotros: false, apagar: null };
+  f.proc = spawn(rutaStreamlink(config), ['--stdout', '--twitch-disable-ads', '--loglevel', 'error',
+    '--stream-segment-attempts', '5', '--stream-segment-timeout', '20', `https://twitch.tv/${canal}`, calidad], { windowsHide: true });
+  f.proc.stdout.on('error', () => {});
+  f.proc.stderr.on('data', (d) => { f.errores = (f.errores + d.toString()).slice(-1500); });
+  f.proc.on('error', (e) => { for (const c of f.clientes) c.alError?.(`No pude abrir Streamlink (${e.code})`, e.code); });
+  f.proc.stdout.on('data', (trozo) => {
+    for (const c of f.clientes) {
+      if (c.stdin.destroyed || !c.stdin.writable) continue;
+      let parte = trozo;
+      if (!c.enganchado) {
+        // Si en 8 s no hubo un cuadro clave marcado, se engancha en cualquier inicio de tabla.
+        const i = inicioDeTramo(trozo, Date.now() - c.desde > 8000);
+        if (i < 0) continue;
+        c.enganchado = true;
+        parte = trozo.subarray(i);
+      }
+      // Si alguien se atora (p. ej. su subida a YouTube no avanza), no acumulamos memoria: se reinicia solo él.
+      if (c.stdin.writableLength > 32 * 1024 * 1024) { c.atorado(); continue; }
+      c.stdin.write(parte);
+    }
+  });
+  f.proc.on('close', (codigo) => {
+    f.cerrada = true;
+    clearTimeout(f.apagar);
+    if (fuentes.get(clave) === f) fuentes.delete(clave);
+    if (!f.porNosotros && f.clientes.size) golpe('twitch');
+    for (const c of [...f.clientes]) c.alCorte(codigo, f.errores.trim());
+    f.clientes.clear();
+  });
+  fuentes.set(clave, f);
+  return f;
+}
+
+// Lanza un FFmpeg alimentado con tu directo de Twitch (de la descarga compartida). Devuelve { detener, salida }.
+export function lanzarDesdeTwitch({ config, canal, calidad = 'best', argsSalida, alError, alTerminar }) {
+  const ff = spawn(rutaFfmpeg(config), ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', ...argsSalida], { windowsHide: true });
+  ff.stdin.on('error', () => {});
+  let errores = '';
+  let erroresFuente = '';
+  ff.stderr.on('data', (d) => { errores = (errores + d.toString()).slice(-1500); });
+  ff.on('error', (e) => alError?.(`No pude abrir FFmpeg (${e.code})`, e.code));
+
+  const f = fuenteCompartida(config, canal, calidad);
+  const cliente = {
+    stdin: ff.stdin,
+    enganchado: false,
+    desde: Date.now(),
+    alError,
+    // Se acabó la descarga: le cerramos la entrada para que FFmpeg termine limpio (y si no, se fuerza).
+    alCorte: (_codigo, err) => { erroresFuente = err; try { ff.stdin.end(); } catch { /* ya cerrada */ } forzar(); },
+    atorado: () => { erroresFuente = 'El envío se atoró (la subida no avanzaba)'; matar(); },
+  };
+  let terminado = false;
+  const matar = () => { try { ff.kill(); } catch { /* ya no existe */ } forzar(); };
+  const forzar = () => setTimeout(() => { if (!terminado) try { ff.kill('SIGKILL'); } catch { /* ya no existe */ } }, 4000);
+  f.clientes.add(cliente);
+
   let cerrado = false;
-  const cerrar = (codigo) => {
+  ff.on('close', (codigo) => {
+    terminado = true;
+    soltar(f, cliente);
     if (cerrado) return;
     cerrado = true;
-    fuente.kill();
-    ff.kill();
-    alTerminar?.(codigo, errores.trim());
-  };
-  ff.on('close', cerrar);
-  fuente.on('close', () => setTimeout(() => cerrar(null), 3000));
+    alTerminar?.(codigo, [erroresFuente, errores.trim()].filter(Boolean).join(' · '));
+  });
 
-  return { detener: () => { cerrado = true; fuente.kill(); ff.kill(); }, salida: ff.stdout };
+  return {
+    detener: () => { cerrado = true; soltar(f, cliente); matar(); },
+    salida: ff.stdout,
+  };
 }
 
 // Ejecuta ffmpeg y espera a que termine.

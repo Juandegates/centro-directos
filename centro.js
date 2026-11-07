@@ -19,6 +19,7 @@ import { iniciarServidor } from './servidor.js';
 import { probarTodo } from './diagnostico.js';
 import { revisarVersion, actualizar } from './actualizar.js';
 import { lanzarDesdeTwitch } from './herramientas.js';
+import * as red from './red.js';
 import { ajustes, guardarAjustes } from './ajustes.js';
 import { avisar } from './avisos.js';
 import { alAvisoIA, configurarIA } from './ia.js';
@@ -146,7 +147,9 @@ async function iniciarYoutube({ reanudar = false } = {}) {
 
 function arrancarRelevo(rtmp) {
   let fallas = 0;
+  let desde = 0;
   const lanzar = () => {
+    desde = Date.now();
     yt.relevo = lanzarDesdeTwitch({
       config: leerConfig(),
       canal: ctx.canal.login,
@@ -155,8 +158,9 @@ function arrancarRelevo(rtmp) {
       alError: (m) => marcar('envioYoutube', 'error', m),
       alTerminar: (codigo, errores) => {
         if (!yt.directo) return;
-        fallas++;
-        const espera = Math.min(60, 5 * fallas);
+        red.golpe('youtube');
+        fallas = Date.now() - desde > 3 * 60_000 ? 1 : fallas + 1; // si llevaba rato bien, se vuelve a contar desde 1
+        const espera = red.esperaReintento(fallas);
         // La primera falla suele ser que el directo está terminando: reintentamos sin alarmar.
         if (fallas >= 2) marcar('envioYoutube', fallas >= 3 ? 'error' : 'aviso', `Se cortó el envío a YouTube; reintento en ${espera} s`, errores || `código ${codigo}`);
         setTimeout(() => yt.directo && lanzar(), espera * 1000);
@@ -262,12 +266,14 @@ async function canalKick() {
 }
 
 async function iniciarKick() {
-  if (kk.activo) return;
+  if (kk.activo || ahorro.pausado) return;
   if (ajustes().envioKick === false) return marcar('envioKick', 'apagado', 'Envío a Kick apagado desde la app');
   if (!kick.envioConfigurado()) return marcar('envioKick', 'apagado', 'Sin configurar (falta la clave de transmisión de Kick en claves.txt)');
   kk.activo = true;
   let fallas = 0;
+  let desde = 0;
   const lanzar = () => {
+    desde = Date.now();
     kk.relevo = lanzarDesdeTwitch({
       config: leerConfig(),
       canal: ctx.canal.login,
@@ -276,9 +282,10 @@ async function iniciarKick() {
       alError: (m) => marcar('envioKick', 'error', m),
       alTerminar: (codigo, errores) => {
         if (!kk.activo) return;
-        fallas++;
+        red.golpe('kick');
+        fallas = Date.now() - desde > 3 * 60_000 ? 1 : fallas + 1;
         kk.ultimaFalla = Date.now();
-        const espera = Math.min(60, 5 * fallas);
+        const espera = red.esperaReintento(fallas);
         if (fallas >= 2) marcar('envioKick', fallas >= 3 ? 'error' : 'aviso', `Se cortó el envío a Kick; reintento en ${espera} s`, errores || `código ${codigo}`);
         setTimeout(() => kk.activo && lanzar(), espera * 1000);
       },
@@ -321,16 +328,55 @@ async function revisarKick() {
   }
 }
 
-async function detenerKick() {
+async function detenerKick({ pausa = false } = {}) {
   const estaba = kk.activo;
   kk.activo = false;
   clearInterval(kk.revision);
   kk.relevo?.detener();
   kk.relevo = null;
+  if (pausa) return;
   kk.tituloPuesto = '';
   kk.juegoPuesto = '';
   if (estaba || kick.envioConfigurado()) marcar('envioKick', 'apagado', 'Sin directo');
 }
+
+// ---------- Modo ahorro: si el internet se satura, Kick se pausa solo (Twitch y YouTube tienen prioridad) ----------
+// La grabación de clips ya no gasta internet (usa la misma descarga que YouTube), así que lo único que vale la pena
+// pausar es el envío a Kick. Vuelve solo cuando la red lleva 3 min tranquila; cada pausa seguida dura más (5, 10, 20 min).
+const ahorro = { pausado: false, veces: 0, timer: null };
+red.alSaturar(async (origen) => {
+  if (!kk.activo || ahorro.pausado || !ctx?.datos.actual().enVivo) return;
+  ahorro.pausado = true;
+  ahorro.veces++;
+  const minutos = Math.min(20, 5 * 2 ** (ahorro.veces - 1));
+  await detenerKick({ pausa: true });
+  marcar('envioKick', 'aviso', `En pausa ${minutos} min: tu internet está saturado (Twitch y YouTube van primero). Vuelve solo.`, `última falla: ${origen}`);
+  log(`🐢 Modo ahorro: pausé Kick ${minutos} min porque el internet de la PC se saturó (${origen})`, { nivel: 'aviso' });
+  avisar('🐢 Modo ahorro', `Pausé Kick ${minutos} min porque tu internet está saturado. Twitch y YouTube siguen. Kick vuelve solo.`, { etiquetas: ['turtle'], clave: 'ahorro', cadaMinutos: 30 });
+  const volver = () => {
+    if (!ahorro.pausado) return;
+    if (!ctx?.datos.actual().enVivo) { ahorro.pausado = false; return; }
+    if (Date.now() - red.ultimoGolpe() < 3 * 60_000) { ahorro.timer = setTimeout(volver, 60_000); return; }
+    ahorro.pausado = false;
+    log('🐇 La red ya está tranquila: vuelvo a enviar a Kick');
+    iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message));
+  };
+  clearTimeout(ahorro.timer);
+  ahorro.timer = setTimeout(volver, minutos * 60_000);
+});
+function terminarAhorro() {
+  clearTimeout(ahorro.timer);
+  ahorro.pausado = false;
+  ahorro.veces = 0;
+  red.reiniciar();
+}
+
+// Arranque escalonado: YouTube primero, la grabación a los 30 s y Kick al minuto (no todo de golpe).
+let escalones = [];
+function escalonar(segundos, fn) {
+  escalones.push(setTimeout(() => { if (ctx?.datos.actual().enVivo) fn(); }, segundos * 1000));
+}
+function cancelarEscalones() { escalones.forEach(clearTimeout); escalones = []; }
 
 // Sesión de Kick lista: datos del canal y aviso de mensajes del chat.
 async function prepararKick() {
@@ -364,9 +410,11 @@ async function alEmpezar() {
     log('🔄 El Centro se reinició a media transmisión: retomo todo sin repetir anuncios');
     ctx.momentos.retomar();
     ctx.auto.alReanudar();
-    ctx.captura.iniciar();
+    cancelarEscalones();
+    terminarAhorro();
     await iniciarYoutube({ reanudar: true });
-    iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message));
+    escalonar(30, () => ctx.captura.iniciar());
+    escalonar(60, () => iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message)));
     ctx.crecer.alEmpezar({ reanudar: true }).catch(() => {});
     setTimeout(() => {
       const p = Object.fromEntries(verPartes().map((x) => [x.id, x.estado]));
@@ -380,11 +428,13 @@ async function alEmpezar() {
   // v5: si te reconectas antes de que se publique lo del directo anterior, es el mismo directo.
   const continuar = ctx.auto.activo() ? ctx.auto.alEmpezar() : false;
   if (!continuar) ctx.momentos.nuevoDirecto();
-  ctx.captura.iniciar();
+  cancelarEscalones();
+  terminarAhorro();
   ctx.crecer.alEmpezar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
   ctx.bots.kick.nuevoDirecto();
   await iniciarYoutube();
-  iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message));
+  escalonar(30, () => ctx.captura.iniciar());
+  escalonar(60, () => iniciarKick().catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message)));
   ctx.promos.alEmpezar().catch(() => {});
   // Al minuto y medio, un resumen de cómo arrancó todo.
   setTimeout(() => {
@@ -402,6 +452,8 @@ async function alTerminar() {
   inicioDirecto = null;
   marcar('directo', 'apagado', 'Sin directo');
   const d = ctx.datos.actual();
+  cancelarEscalones();
+  terminarAhorro();
   ctx.captura.detener();
   const directoYt = await detenerYoutube();
   await detenerKick();
@@ -594,6 +646,8 @@ const rutas = {
   },
   'POST /api/kick': async ({ cuerpo }) => {
     guardarAjustes({ envioKick: Boolean(cuerpo.envio) });
+    clearTimeout(ahorro.timer);
+    ahorro.pausado = false; // si lo prendes o apagas tú, manda lo que tú digas
     if (!cuerpo.envio) await detenerKick();
     else if (ctx?.datos.actual().enVivo) await iniciarKick();
     return { ok: true };

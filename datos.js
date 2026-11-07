@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { preguntarIA } from './ia.js';
 import { marcar, log, verPartes } from './estado.js';
 import * as twitch from './twitch.js';
+import { golpe } from './red.js';
 
 const ARCHIVO = new URL('./memoria.json', import.meta.url);
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -73,6 +74,7 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
       if (t?.estado === 'aviso' && t.mensaje === 'No pude leer tu canal de Twitch') marcar('twitch', 'ok', 'Twitch volvió a responder; leyendo tu canal');
     } catch (e) {
       const sinRed = e.cause?.code || e.name === 'TimeoutError' || /fetch failed/i.test(e.message);
+      if (sinRed) golpe('internet');
       marcar(sinRed ? 'internet' : 'twitch', sinRed ? 'error' : 'aviso', sinRed ? 'La PC no tiene internet o Twitch no responde' : 'No pude leer tu canal de Twitch', e.message);
     }
   }

@@ -31,7 +31,11 @@ async function gql(query, variables = {}) {
   const texto = await res.text();
   let d;
   try { d = JSON.parse(texto); } catch { throw new Error(`Buffer respondió ${res.status}: ${texto.slice(0, 200)}`); }
-  if (!res.ok || d.errors?.length) throw new Error(`Buffer: ${d.errors?.map((e) => e.message).join('; ') || res.status}`);
+  // Buffer puede devolver datos Y avisos a la vez (por ejemplo, el post sí se creó pero un campo falló).
+  // Si trae datos útiles se usan: tirar error aquí haría reintentar y publicar el video DOS veces.
+  const hayDatos = Object.values(d.data ?? {}).some(Boolean);
+  if (!res.ok || (d.errors?.length && !hayDatos)) throw new Error(`Buffer: ${d.errors?.map((e) => e.message).join('; ') || res.status}`);
+  if (d.errors?.length) log('Buffer respondió con avisos: ' + d.errors.map((e) => e.message).join('; ').slice(0, 300), { nivel: 'aviso' });
   return d.data;
 }
 
@@ -70,6 +74,25 @@ async function publicarBuffer(servicio, { url, texto, titulo }, config) {
   const r = d.createPost ?? {};
   if (!r.post) throw new Error(`Buffer no aceptó el video: ${r.message ?? 'sin detalle'}`);
   return { id: r.post.id, canal: canal.id, estado: r.post.status, url: r.post.externalLink ?? null };
+}
+
+// ¿Ya hay en Buffer un post igual (mismo canal, mismo texto, de las últimas 12 h) que no haya fallado?
+// Se revisa antes de crear cada post: si un intento anterior sí llegó a Buffer (aunque la respuesta se perdió
+// por un corte de internet), se usa ese en lugar de crear otro. Así un video nunca sale dos veces.
+const SERVICIO_DE = { tiktok: 'tiktok', youtube: 'youtube', x: 'twitter' };
+export const esDeBuffer = (destino) => destino === 'tiktok' || destino === 'youtube' || (destino === 'x' && xPorBuffer());
+export async function buscarPostBuffer(destino, item, config) {
+  await canalesBuffer();
+  const canal = canalDe(SERVICIO_DE[destino], config);
+  if (!canal) return null;
+  const texto = (destino === 'x' ? String(item.textoX ?? item.titulo).slice(0, 280) : item.textoTikTok ?? item.titulo ?? '').trim();
+  const d = await gql('query B($input: PostsInput!) { posts(first: 25, input: $input) { edges { node { id text status createdAt } } } }',
+    { input: { organizationId: bufferCache.org, filter: { channelIds: [canal.id] } } });
+  const nodos = d.posts?.edges?.map((e) => e.node).filter(Boolean) ?? [];
+  const limite = Date.now() - 12 * 3600_000;
+  const igual = nodos.find((n) => String(n.text ?? '').trim() === texto && n.status !== 'error'
+    && (!n.createdAt || new Date(n.createdAt).getTime() >= limite));
+  return igual ? { id: igual.id, canal: canal.id, estado: igual.status, url: null } : null;
 }
 
 // ¿Ya salió? Busca el post entre los últimos del canal.

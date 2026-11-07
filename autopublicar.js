@@ -5,7 +5,7 @@
 // - Los días sin directo, a las 6 pm, sale un video "gancho" con lo mejor que quedó guardado.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { lista as bandeja, actualizar, CARPETA_CLIPS } from './bandeja.js';
-import { publicarEn, confirmar, destinosListos, NOMBRES, xPorBuffer, canalesBuffer, bufferConfigurado } from './publicar.js';
+import { publicarEn, confirmar, destinosListos, NOMBRES, xPorBuffer, canalesBuffer, bufferConfigurado, esDeBuffer, buscarPostBuffer } from './publicar.js';
 import { log, marcar } from './estado.js';
 
 const ARCHIVO = new URL('./publicacion.json', import.meta.url);
@@ -152,6 +152,24 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
         }
         if (d.estado !== 'pendiente' || (d.siguiente ?? 0) > Date.now()) continue;
         if (d.intentos >= 3) { d.estado = 'error'; continue; }
+        // Antes de crear un post en Buffer: ¿ya existe uno igual? (un intento anterior que sí llegó)
+        const yaIntentado = d.intentos > 0 || s.cola.some((o) => o !== e && o.itemId === e.itemId && o.destinos[destino]);
+        if (esDeBuffer(destino)) {
+          let previo = null;
+          try { previo = await buscarPostBuffer(destino, item, config); } catch (err) {
+            if (yaIntentado) { // no se puede comprobar: mejor no arriesgar a duplicarlo; se vuelve a revisar en 20 min
+              d.intentos++; d.error = 'No pude comprobar en Buffer si ya salió: ' + err.message; d.siguiente = Date.now() + 20 * 60_000;
+              log(`⚠️ ${NOMBRES[destino]}: no pude comprobar si "${item.titulo}" ya está en Buffer; no lo reenvío todavía`, { nivel: 'aviso' });
+              if (d.intentos >= 3) { d.estado = 'error'; avisar(`⚠️ No pude publicar en ${NOMBRES[destino]}`, `${item.titulo}\nRevisa en Buffer si salió.`, { clave: `pub-${destino}-${item.id}` }); }
+              guardar(); continue;
+            }
+          }
+          if (previo) {
+            d.info = previo; d.estado = 'enviado'; d.hora = Date.now(); d.error = null;
+            log(`🔁 ${NOMBRES[destino]}: "${item.titulo}" ya estaba en Buffer; no lo vuelvo a enviar`);
+            guardar(); continue;
+          }
+        }
         try {
           const r = await publicarEn(destino, item, { config, carpetaClips: CARPETA_CLIPS });
           d.info = r; d.url = r.url ?? null; d.hora = Date.now();

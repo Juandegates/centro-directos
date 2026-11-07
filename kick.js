@@ -40,6 +40,7 @@ export function destinoEnvio() {
   return { host, puerto, seguro, app, clave, pareceClave: /^sk_/i.test(clave), url: `${proto}://${host}:${puerto}/${app}/${clave}` };
 }
 export const envioConfigurado = () => Boolean(destinoEnvio()?.clave);
+export const tieneSesion = () => Boolean(tokens?.refresh_token);
 export const urlEnvio = () => destinoEnvio()?.url ?? '';
 
 // ¿Por qué se cayó el envío a Kick? Con lo que vio el túnel se sabe la causa y se habla claro.

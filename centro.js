@@ -425,7 +425,7 @@ async function prepararKick() {
   }
   try {
     await kick.suscribirChat();
-    marcar('chatKick', 'aviso', 'Esperando el primer mensaje del chat de Kick');
+    marcar('chatKick', 'apagado', 'Listo: lee el chat de Kick cuando estás en vivo');
   } catch (e) {
     marcar('chatKick', 'aviso', 'Kick no aceptó avisarme del chat (revisa la dirección de webhooks de tu app de Kick)', e.message);
   }
@@ -463,6 +463,7 @@ async function alEmpezar() {
   // v5: si te reconectas antes de que se publique lo del directo anterior, es el mismo directo.
   const continuar = ctx.auto.activo() ? ctx.auto.alEmpezar() : false;
   if (!continuar) ctx.momentos.nuevoDirecto();
+  ctx.momentos.empezar();
   cancelarEscalones();
   terminarAhorro();
   ctx.crecer.alEmpezar().catch((e) => log('⚠️ Crecer: ' + e.message, { nivel: 'aviso' }));
@@ -489,6 +490,7 @@ async function alTerminar() {
   const d = ctx.datos.actual();
   cancelarEscalones();
   terminarAhorro();
+  ctx.momentos.terminar();
   ctx.captura.detener();
   const directoYt = await detenerYoutube();
   await detenerKick();

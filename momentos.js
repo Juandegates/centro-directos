@@ -9,7 +9,7 @@
 //    La pelea solo termina con una señal clara (ganaste o perdiste). Entonces se revisa lo ya grabado
 //    para encontrar el momento exacto y se hace el clip del final del primer intento y, si perdiste,
 //    otro cuando por fin lo derrotas.
-import { readdirSync, statSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { readdirSync, statSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CARPETA } from './captura.js';
@@ -43,6 +43,18 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
   let vencidos = new Map();
   let inicioVentana = Date.now(); // para "el mejor momento de cada 30 min"
   let ultimoClipHecho = 0;
+  // Se guarda en disco cada 30 s: si el Centro se reinicia a media transmisión, no se pierden los momentos
+  // calificados ni se reinicia la cuenta de los 30 min (antes, cada reinicio la volvía a empezar).
+  const ARCHIVO_ESTADO = new URL('./momentos-estado.json', import.meta.url);
+  let enDirecto = false;
+  const guardarEstado = () => {
+    if (!enDirecto) return;
+    try {
+      writeFileSync(ARCHIVO_ESTADO, JSON.stringify({ guardado: Date.now(), inicioVentana, ultimoClipHecho, clipsHoy,
+        momentos: momentos.map(({ foto, ...m }) => m) }));
+    } catch { /* sin disco: solo en memoria */ }
+  };
+  setInterval(guardarEstado, 30_000);
   let piezas = []; // { hora, puntos, que, ruta }
 
   // Guarda ~30 s alrededor del momento (22 s antes y 10 s después), sin recomprimir.
@@ -361,6 +373,8 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
 
   return {
     nuevoDirecto() {
+      enDirecto = true;
+      rmSync(ARCHIVO_ESTADO, { force: true });
       volumenes = [];
       momentos = [];
       clipsHoy = 0;
@@ -374,17 +388,31 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
       ultimoClipHecho = 0;
       ultimaEvaluacion = Date.now(); // la primera revisión periódica, a los pocos minutos
     },
+    empezar() { enDirecto = true; },
+    terminar() { guardarEstado(); enDirecto = false; },
     lista: () => momentos,
     piezas: () => piezas,
     destacados: () => destacados,
     // El Centro se reinició a media transmisión: recuperamos las piezas ya guardadas.
     retomar() {
+      enDirecto = true;
       inicioVentana = Date.now();
       ultimaEvaluacion = Date.now();
+      // ¿Hay lo guardado de este mismo directo (de hace menos de 1 h)? Se recupera tal cual.
+      try {
+        const e = JSON.parse(readFileSync(ARCHIVO_ESTADO, 'utf8'));
+        if (Date.now() - e.guardado < 60 * 60_000) {
+          momentos = (e.momentos ?? []).map((m) => ({ ...m, foto: null }));
+          inicioVentana = e.inicioVentana ?? inicioVentana;
+          ultimoClipHecho = e.ultimoClipHecho ?? 0;
+          clipsHoy = e.clipsHoy ?? 0;
+          log(`🔄 Recuperé ${momentos.length} momentos calificados de este directo`, { parte: 'clips' });
+        }
+      } catch { /* no había nada guardado */ }
       try {
         piezas = readdirSync(CARPETA_PIEZAS).filter((f) => /^\d+_\d+\.ts$/.test(f)).map((f) => {
           const [hora, puntos] = f.replace('.ts', '').split('_').map(Number);
-          return { hora, puntos, que: '', ruta: join(CARPETA_PIEZAS, f) };
+          return { hora, puntos, que: momentos.find((m) => m.hora === hora)?.que ?? '', ruta: join(CARPETA_PIEZAS, f) };
         });
       } catch { piezas = []; }
     },

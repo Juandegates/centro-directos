@@ -22,7 +22,39 @@ function leer() {
 export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, urlApp, enVivo }) {
   let s = leer();
   const guardar = () => writeFileSync(ARCHIVO, JSON.stringify(s, null, 2));
-  const cfg = () => ({ activo: true, minutosDespues: 60, horasEntre: 3, clipsPorDirecto: 3, resumen: true, horaGancho: '18:00', maxXMes: 10, minimoMinutos: 10, ...(leerConfig().autoPublicar ?? {}) });
+  const cfg = () => ({ activo: true, minutosDespues: 60, horasEntre: 3, clipsPorDirecto: 3, resumen: true, horaGancho: '18:00', maxXMes: 10, minimoMinutos: 10,
+    silencio: { desde: 0, hasta: 9 }, ...(leerConfig().autoPublicar ?? {}) });
+  // Horario de silencio (de 12 am a 9 am): un video que caiga ahí se recorre a las 9 am (casi nadie ve de madrugada).
+  function fueraDeSilencio(cuando) {
+    const { desde = 0, hasta = 9 } = cfg().silencio ?? {};
+    if (desde === hasta) return cuando;
+    const f = new Date(cuando);
+    const h = f.getHours();
+    const dentro = desde < hasta ? h >= desde && h < hasta : h >= desde || h < hasta;
+    if (!dentro) return cuando;
+    if (desde > hasta && h >= desde) f.setDate(f.getDate() + 1); // p. ej. silencio de 11 pm a 9 am, a las 11:30 pm → mañana
+    f.setHours(hasta, 0, 0, 0);
+    return f.getTime();
+  }
+  // Recorre los videos que todavía no salen y caen en el silencio, manteniendo la separación entre ellos.
+  function reacomodarSilencio() {
+    const sep = cfg().horasEntre * HORA;
+    const sinEmpezar = (e) => Object.values(e.destinos).every((d) => d.estado === 'pendiente' && !d.intentos) && !e.manual;
+    let anterior = 0;
+    let cambio = false;
+    for (const e of [...s.cola].sort((a, b) => a.cuando - b.cuando)) {
+      if (!sinEmpezar(e)) { anterior = Math.max(anterior, e.cuando); continue; }
+      let c = fueraDeSilencio(e.cuando);
+      if (c !== e.cuando && anterior && c < anterior + sep) c = fueraDeSilencio(anterior + sep);
+      if (c !== e.cuando) {
+        log(`🌙 "${e.titulo}" caía de madrugada: sale el ${new Date(c).toLocaleString('es-MX', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`);
+        e.cuando = c; cambio = true;
+        actualizar(e.itemId, { programado: new Date(c).toISOString() });
+      }
+      anterior = e.cuando;
+    }
+    if (cambio) guardar();
+  }
   let trabajando = false;
   const arranque = Date.now();
 
@@ -64,7 +96,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
   function encolar(item, cuando, { conX = false, saltar = [] } = {}) {
     const listos = destinosListos(leerConfig()).filter((d) => (d !== 'x' || conX) && !saltar.includes(d));
     if (!listos.length) return false;
-    s.cola.push({ itemId: item.id, titulo: item.titulo, cuando, destinos: Object.fromEntries(listos.map((d) => [d, { estado: 'pendiente', intentos: 0 }])) });
+    s.cola.push({ itemId: item.id, titulo: item.titulo, cuando, ...(item.manual ? { manual: true } : {}), destinos: Object.fromEntries(listos.map((d) => [d, { estado: 'pendiente', intentos: 0 }])) });
     actualizar(item.id, { programado: new Date(cuando).toISOString(), auto: item.auto ?? true });
     guardar();
     return true;
@@ -232,6 +264,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
       const ahora = new Date();
       const yaEsHora = ahora.getHours() * 60 + ahora.getMinutes() >= h * 60 + (m || 0);
       if (yaEsHora && !enVivo() && !s.pendiente && s.ultimoDirecto !== hoy() && s.ultimoGancho !== hoy()) await ganchoDelDia();
+      reacomodarSilencio();
       await publicarPendientes();
     } catch (e) {
       log('⚠️ Piloto de publicaciones: ' + e.message, { nivel: 'aviso', detalle: e.stack });
@@ -257,7 +290,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
       for (const e of s.cola.filter((x) => x.itemId === item.id)) {
         for (const [k, d] of Object.entries(e.destinos)) if (['ok', 'enviado', 'dudoso'].includes(d.estado)) yaSalio.add(k);
       }
-      if (!encolar(item, Date.now(), { conX: usarX() && !yaSalio.has('x'), saltar: [...yaSalio] })) throw new Error('Ya está publicado en todas tus redes conectadas');
+      if (!encolar({ ...item, manual: true }, Date.now(), { conX: usarX() && !yaSalio.has('x'), saltar: [...yaSalio] })) throw new Error('Ya está publicado en todas tus redes conectadas');
       setTimeout(() => { tick(); }, 1000);
     },
     // Lo que viene y lo que ya salió (para la app).

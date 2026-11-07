@@ -8,6 +8,7 @@ import { buscar, buscadorConfigurado, usadasEsteMes } from './buscador.js';
 import * as twitch from './twitch.js';
 import * as youtube from './youtube.js';
 import * as kick from './kick.js';
+import { probarConexion } from './tunel.js';
 import { preguntarClaude, claudeDisponible } from './claude.js';
 import { probarServicios } from './publicar.js';
 import { urlBase } from './publico.js';
@@ -72,7 +73,13 @@ export async function probarTodo({ leerConfig, canalId }) {
       if (!kick.configurado()) return 'Clave de transmisión lista · sin app de Kick (no pone título ni platica en el chat)';
       if (!kick.tieneSesion()) throw new Error('Falta autorizar Kick en http://localhost:3000/kick desde la PC');
       const c = await kick.miCanal();
-      return `Canal kick.com/${c.slug} · clave de transmisión lista`;
+      const d = kick.destinoEnvio();
+      let servidor = '';
+      if (d?.seguro) {
+        try { await probarConexion({ host: d.host, puerto: d.puerto }); servidor = ' · servidor de envío alcanzable'; }
+        catch (e) { throw new Error(`No pude abrir conexión segura con el servidor de envío de Kick (${d.host}): ${e.code ?? e.message}`); }
+      }
+      return `Canal kick.com/${c.slug} · clave de transmisión ${d?.pareceClave ? 'lista' : 'puesta (ojo: no parece de Kick, deben empezar con sk_)'}${servidor}`;
     }));
   }
   // v5: Claude (con tu plan Max) para elegir y revisar los videos.

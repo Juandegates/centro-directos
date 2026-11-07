@@ -18,15 +18,47 @@ const valor = (k) => {
   return v && !v.startsWith('pega_aqui') ? v.trim() : '';
 };
 export const configurado = () => Boolean(valor('KICK_CLIENT_ID') && valor('KICK_CLIENT_SECRET'));
-export const envioConfigurado = () => Boolean(valor('KICK_STREAM_URL') && valor('KICK_STREAM_KEY'));
-export const tieneSesion = () => Boolean(tokens?.refresh_token);
-// Kick (Amazon IVS) necesita "rtmps://<servidor>:443/app/<clave>". Si el servidor se pegó sin ":443/app", se completa.
-export function urlEnvio() {
-  let base = valor('KICK_STREAM_URL').trim().replace(/\/+$/, '');
-  const m = base.match(/^(rtmps?):\/\/([^/:]+)(:\d+)?(\/.*)?$/i);
-  if (m && /live-video\.net$/i.test(m[2]) && !m[4]) base = `rtmps://${m[2]}:443/app`;
-  else if (m && /live-video\.net$/i.test(m[2]) && !m[3]) base = `rtmps://${m[2]}:443${m[4]}`;
-  return `${base}/${valor('KICK_STREAM_KEY')}`;
+// Dónde se envía el video. Kick (Amazon IVS) necesita "rtmps://<servidor>:443/app/<clave>".
+// Se arregla solo lo más común al pegar: la dirección sin ":443/app", la clave pegada con toda la dirección,
+// o la dirección pegada con la clave al final, comillas y espacios de más.
+export function destinoEnvio() {
+  const limpio = (t) => t.trim().replace(/^["'\s]+|["'\s]+$/g, '');
+  let url = limpio(valor('KICK_STREAM_URL')).replace(/\/+$/, '');
+  let clave = limpio(valor('KICK_STREAM_KEY'));
+  if (/^rtmps?:\/\//i.test(clave)) { const partes = clave.split('/'); clave = partes.pop(); url = partes.join('/'); }
+  else if (clave.includes('/')) clave = clave.split('/').pop();
+  const m = url.match(/^(rtmps?):\/\/([^/:]+)(?::(\d+))?(?:\/(.*))?$/i);
+  if (!m) return null;
+  let [, proto, host, puerto, ruta = ''] = m;
+  const trozos = ruta.split('/').filter(Boolean);
+  if (trozos.length && /^sk_/i.test(trozos[trozos.length - 1])) { const k = trozos.pop(); if (!clave) clave = k; }
+  if (/live-video\.net$/i.test(host)) { proto = 'rtmps'; puerto = '443'; if (!trozos.length) trozos.push('app'); }
+  proto = proto.toLowerCase();
+  const seguro = proto === 'rtmps';
+  puerto = Number(puerto || (seguro ? 443 : 1935));
+  const app = trozos.join('/') || 'app';
+  return { host, puerto, seguro, app, clave, pareceClave: /^sk_/i.test(clave), url: `${proto}://${host}:${puerto}/${app}/${clave}` };
+}
+export const envioConfigurado = () => Boolean(destinoEnvio()?.clave);
+export const urlEnvio = () => destinoEnvio()?.url ?? '';
+
+// ¿Por qué se cayó el envío a Kick? Con lo que vio el túnel se sabe la causa y se habla claro.
+export function causaEnvio(ev, errores, duracionMs) {
+  const seg = Math.round((ev?.ms ?? duracionMs) / 1000);
+  if (ev && !ev.seguro) {
+    if (/ENOTFOUND|EAI_AGAIN/.test(ev.error ?? '')) return { clase: 'config', texto: 'No encuentro el servidor de Kick (revisa KICK_STREAM_URL en claves.txt)' };
+    if (/ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ECONNRESET/.test(ev.error ?? '')) return { clase: 'red', texto: 'No pude conectar con el servidor de Kick (puerto 443): red o firewall' };
+    return { clase: 'tls', texto: 'Falló la conexión segura (TLS) con Kick' };
+  }
+  if (ev?.tipo === 'cierre' || ev?.tipo === 'corte') {
+    if (ev.ms < 30_000 && ev.enviados < 200 * 1024) return { clase: 'config', texto: 'Kick cerró la conexión en cuanto recibió la clave: la clave de transmisión no es válida o es la vieja. Pega la nueva en KICK_STREAM_KEY de claves.txt y reinicia el Centro' };
+    if (ev.ms < 90_000) return { clase: 'calidad', texto: `Kick cortó el envío a los ${seg} s: puede ser que no acepte la calidad del directo (Kick admite hasta 1080p60 y 8.5 Mbps)` };
+    return { clase: 'corte', texto: `Kick cortó la conexión después de ${Math.round(seg / 60)} min (red)` };
+  }
+  // FFmpeg cerró por su cuenta: casi siempre se acabó la descarga de Twitch o el directo está terminando.
+  if (/Server error|publish|Unexpected/i.test(errores)) return { clase: 'config', texto: 'Kick rechazó la transmisión (revisa la clave en claves.txt)' };
+  if (!ev && /Error opening output/i.test(errores)) return { clase: 'config', texto: 'FFmpeg no pudo abrir la conexión con Kick' };
+  return { clase: 'corte', texto: 'Se cortó el envío a Kick' };
 }
 
 const base64url = (b) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');

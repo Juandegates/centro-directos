@@ -20,6 +20,7 @@ import { probarTodo } from './diagnostico.js';
 import { revisarVersion, actualizar } from './actualizar.js';
 import { lanzarDesdeTwitch } from './herramientas.js';
 import * as red from './red.js';
+import { abrirTunel } from './tunel.js';
 import { ajustes, guardarAjustes } from './ajustes.js';
 import { avisar } from './avisos.js';
 import { alAvisoIA, configurarIA } from './ia.js';
@@ -158,7 +159,7 @@ function arrancarRelevo(rtmp) {
       alError: (m) => marcar('envioYoutube', 'error', m),
       alTerminar: (codigo, errores) => {
         if (!yt.directo) return;
-        red.golpe('youtube');
+        red.golpe('youtube', { instantaneo: Date.now() - desde < 15_000 });
         fallas = Date.now() - desde > 3 * 60_000 ? 1 : fallas + 1; // si llevaba rato bien, se vuelve a contar desde 1
         const espera = red.esperaReintento(fallas);
         // La primera falla suele ser que el directo está terminando: reintentamos sin alarmar.
@@ -256,7 +257,7 @@ async function sincronizarTituloYoutube(titulo) {
 // ---------- Kick ----------
 // Igual que YouTube: la PC toma tu directo de Twitch y lo reenvía a Kick. Con la sesión de Kick
 // además pone tu mismo título y juego, y el bot platica en el chat de Kick.
-const kk = { activo: false, relevo: null, revision: null, canal: null, tituloPuesto: '', juegoPuesto: '', ultimaFalla: 0 };
+const kk = { activo: false, relevo: null, revision: null, canal: null, tituloPuesto: '', juegoPuesto: '', ultimaFalla: 0, tunel: null, evento: null, directo: false };
 const PUERTO_AVISOS_KICK = () => leerConfig().kick?.puertoAvisos ?? 3001;
 const urlAvisosKick = () => (nombreTailscale ? `https://${nombreTailscale}:8443/kick/eventos` : '(instala Tailscale en la PC)');
 
@@ -268,29 +269,60 @@ async function canalKick() {
 async function iniciarKick() {
   if (kk.activo || ahorro.pausado) return;
   if (ajustes().envioKick === false) return marcar('envioKick', 'apagado', 'Envío a Kick apagado desde la app');
-  if (!kick.envioConfigurado()) return marcar('envioKick', 'apagado', 'Sin configurar (falta la clave de transmisión de Kick en claves.txt)');
+  const destino = kick.destinoEnvio();
+  if (!destino?.clave) return marcar('envioKick', 'apagado', 'Sin configurar (falta la clave de transmisión de Kick en claves.txt)');
   kk.activo = true;
+  // Túnel seguro: FFmpeg habla con 127.0.0.1 y el Centro pone el TLS hacia Kick (así sabemos en qué paso falla).
+  let tunel = null;
+  if (destino.seguro && !kk.directo) {
+    try {
+      tunel = await abrirTunel({ host: destino.host, puerto: destino.puerto, alEvento: (ev) => {
+        if (ev.tipo === 'conectado') { log(`Kick: conexión segura abierta (${ev.ms} ms)`); return; }
+        kk.evento = ev;
+        log(`Kick: ${ev.tipo}${ev.error ? ' ' + ev.error : ''} a los ${Math.round(ev.ms / 1000)} s · enviados ${Math.round(ev.enviados / 1024)} KB`, { nivel: 'aviso' });
+      } });
+    } catch (e) {
+      log('No pude abrir el túnel local para Kick; envío directo: ' + e.message, { nivel: 'aviso' });
+    }
+  }
+  if (!kk.activo) { tunel?.cerrar(); return; } // lo apagaron mientras se abría el túnel
+  kk.tunel = tunel;
+  const salida = kk.tunel
+    ? ['-rtmp_tcurl', `rtmps://${destino.host}:${destino.puerto}/${destino.app}`, `rtmp://127.0.0.1:${kk.tunel.puerto}/${destino.app}/${destino.clave}`]
+    : [destino.url];
   let fallas = 0;
   let desde = 0;
   const lanzar = () => {
     desde = Date.now();
+    kk.evento = null;
     kk.relevo = lanzarDesdeTwitch({
       config: leerConfig(),
       canal: ctx.canal.login,
       calidad: 'best',
-      argsSalida: ['-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-f', 'flv', '-flvflags', 'no_duration_filesize', kick.urlEnvio()],
+      argsSalida: ['-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-f', 'flv', '-flvflags', 'no_duration_filesize', ...salida],
       alError: (m) => marcar('envioKick', 'error', m),
       alTerminar: (codigo, errores) => {
         if (!kk.activo) return;
-        red.golpe('kick');
-        fallas = Date.now() - desde > 3 * 60_000 ? 1 : fallas + 1;
+        const duracion = Date.now() - desde;
+        const causa = kick.causaEnvio(kk.evento, errores, duracion);
+        red.golpe('kick', { instantaneo: duracion < 15_000 });
+        fallas = duracion > 3 * 60_000 ? 1 : fallas + 1;
         kk.ultimaFalla = Date.now();
-        const espera = red.esperaReintento(fallas);
-        if (fallas >= 2) marcar('envioKick', fallas >= 3 ? 'error' : 'aviso', `Se cortó el envío a Kick; reintento en ${espera} s`, errores || `código ${codigo}`);
+        // Si es configuración o calidad, no tiene caso insistir cada pocos segundos: 1 min y luego cada 5.
+        const espera = ['config', 'calidad', 'tls'].includes(causa.clase) ? (fallas < 2 ? 60 : 300) : red.esperaReintento(fallas);
+        // Si el TLS del Centro no pudo, el siguiente intento va directo con el TLS de FFmpeg (y viceversa).
+        if (causa.clase === 'tls' && kk.tunel) {
+          log('Kick: el TLS del Centro no pudo; pruebo el envío directo con el TLS de FFmpeg', { nivel: 'aviso' });
+          kk.directo = true;
+          detenerKick({ pausa: true }).then(() => iniciarKick()).catch((e) => marcar('envioKick', 'error', 'No pude iniciar el envío a Kick', e.message));
+          return;
+        }
+        const grave = causa.clase !== 'corte' || fallas >= 3;
+        if (grave || fallas >= 2) marcar('envioKick', grave ? 'error' : 'aviso', `${causa.texto}; reintento en ${espera} s`, errores || `código ${codigo}`);
         setTimeout(() => kk.activo && lanzar(), espera * 1000);
       },
     });
-    if (fallas === 0) marcar('envioKick', 'aviso', 'Enviando señal a Kick… (confirmando)');
+    if (fallas === 0) marcar('envioKick', 'aviso', destino.pareceClave ? 'Enviando señal a Kick… (confirmando)' : 'Enviando señal a Kick… (ojo: la clave no parece de Kick, deben empezar con sk_)');
   };
   lanzar();
   setTimeout(revisarKick, 45_000);
@@ -334,7 +366,10 @@ async function detenerKick({ pausa = false } = {}) {
   clearInterval(kk.revision);
   kk.relevo?.detener();
   kk.relevo = null;
+  kk.tunel?.cerrar();
+  kk.tunel = null;
   if (pausa) return;
+  kk.directo = false;
   kk.tituloPuesto = '';
   kk.juegoPuesto = '';
   if (estaba || kick.envioConfigurado()) marcar('envioKick', 'apagado', 'Sin directo');
@@ -420,7 +455,7 @@ async function alEmpezar() {
       const p = Object.fromEntries(verPartes().map((x) => [x.id, x.estado]));
       const s = (e) => (e === 'ok' ? '✅' : e === 'apagado' ? '⚪' : '⚠️');
       avisar('🔄 Centro reiniciado, sigues en vivo', `Twitch ✅ · YouTube ${s(p.envioYoutube)}${kick.envioConfigurado() ? ` · Kick ${s(p.envioKick)}` : ''} · Bot ${s(p.chatTwitch)} · Vista ${s(p.captura)}`, { etiquetas: ['arrows_counterclockwise'], abrir: urlApp(), clave: 'reanudado', cadaMinutos: 10 });
-    }, 60_000);
+    }, 150_000); // Kick arranca al minuto y tarda ~45 s en confirmar
     return;
   }
   ctx.bots.twitch.nuevoDirecto();
@@ -444,7 +479,7 @@ async function alEmpezar() {
     avisar('🔴 Estás en vivo', `Twitch ✅ · YouTube ${s(p.envioYoutube)}${kick.envioConfigurado() ? ` · Kick ${s(p.envioKick)}` : ''} · Bot ${s(p.chatTwitch)} · Vista ${s(p.captura)}\n${ctx.datos.actual().juego}`, {
       etiquetas: ['red_circle'], abrir: urlApp(), clave: 'en-vivo', cadaMinutos: 30,
     });
-  }, 90_000);
+  }, 150_000); // Kick arranca al minuto y tarda ~45 s en confirmar
 }
 
 async function alTerminar() {

@@ -1,22 +1,26 @@
-// ¿El internet de la PC está saturado? Junta las fallas de red (descarga de Twitch, envíos a YouTube y Kick,
-// revisión de internet). Varias fallas en el mismo medio minuto cuentan como un solo "episodio";
-// 3 episodios en 5 minutos = saturado, y avisa a quien esté escuchando (el modo ahorro).
+// ¿El internet de la PC está saturado? Junta las fallas de red de todas las partes (descarga de Twitch,
+// envíos a YouTube y Kick, revisión de internet). Las fallas del mismo medio minuto son un solo "episodio".
+// Saturado = 3 episodios en 5 minutos Y fallas de al menos 2 partes distintas: si solo falla una
+// (por ejemplo Kick con la clave mal), no es la red, es esa parte. Avisa a quien escuche (el modo ahorro).
 const VENTANA = 30_000;
 const PLAZO = 5 * 60_000;
 const NECESARIOS = 3;
 
-let episodios = [];
+let episodios = []; // [{ t, origenes: Set }]
 let ultimo = 0;
 const oyentes = [];
 
-export function golpe(origen = '') {
+// instantaneo: la parte se cayó nada más arrancar (menos de 15 s): eso es configuración, no red; no cuenta.
+export function golpe(origen = '', { instantaneo = false } = {}) {
+  if (instantaneo) return;
   const ahora = Date.now();
   ultimo = ahora;
-  episodios = episodios.filter((t) => ahora - t < PLAZO);
+  episodios = episodios.filter((e) => ahora - e.t < PLAZO);
   const actual = episodios[episodios.length - 1];
-  if (actual && ahora - actual < VENTANA) return;
-  episodios.push(ahora);
-  if (episodios.length >= NECESARIOS) {
+  if (actual && ahora - actual.t < VENTANA) { actual.origenes.add(origen); return; }
+  episodios.push({ t: ahora, origenes: new Set([origen]) });
+  const distintos = new Set(episodios.flatMap((e) => [...e.origenes]));
+  if (episodios.length >= NECESARIOS && distintos.size >= 2) {
     episodios = [];
     for (const f of oyentes) { try { f(origen); } catch { /* que no tumbe al que avisó */ } }
   }

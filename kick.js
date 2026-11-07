@@ -20,7 +20,14 @@ const valor = (k) => {
 export const configurado = () => Boolean(valor('KICK_CLIENT_ID') && valor('KICK_CLIENT_SECRET'));
 export const envioConfigurado = () => Boolean(valor('KICK_STREAM_URL') && valor('KICK_STREAM_KEY'));
 export const tieneSesion = () => Boolean(tokens?.refresh_token);
-export const urlEnvio = () => `${valor('KICK_STREAM_URL').replace(/\/+$/, '')}/${valor('KICK_STREAM_KEY')}`;
+// Kick (Amazon IVS) necesita "rtmps://<servidor>:443/app/<clave>". Si el servidor se pegó sin ":443/app", se completa.
+export function urlEnvio() {
+  let base = valor('KICK_STREAM_URL').trim().replace(/\/+$/, '');
+  const m = base.match(/^(rtmps?):\/\/([^/:]+)(:\d+)?(\/.*)?$/i);
+  if (m && /live-video\.net$/i.test(m[2]) && !m[4]) base = `rtmps://${m[2]}:443/app`;
+  else if (m && /live-video\.net$/i.test(m[2]) && !m[3]) base = `rtmps://${m[2]}:443${m[4]}`;
+  return `${base}/${valor('KICK_STREAM_KEY')}`;
+}
 
 const base64url = (b) => b.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 

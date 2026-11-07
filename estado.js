@@ -54,6 +54,9 @@ export function log(texto, { parte = null, nivel = 'info', detalle = null } = {}
 export function marcar(parte, estado, mensaje, detalle = null) {
   const p = partes[parte];
   if (!p) return;
+  // Nunca guardar claves en lo que se muestra en la app (por ejemplo, la clave de transmisión en un error de FFmpeg).
+  mensaje = limpiar(mensaje);
+  if (detalle) detalle = limpiar(detalle);
   const cambio = p.estado !== estado || p.mensaje !== mensaje;
   const anterior = p.estado;
   p.estado = estado;

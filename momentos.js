@@ -13,7 +13,7 @@ import { readdirSync, statSync, mkdirSync, rmSync, writeFileSync, readFileSync }
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CARPETA } from './captura.js';
-import { medirVolumen, correrFfmpeg } from './herramientas.js';
+import { medirVolumen, correrFfmpeg, cuadroDe } from './herramientas.js';
 
 // Pedacitos de ~30 s de cada momento revisado: con ellos se arma el video resumen de 1:30 al final.
 export const CARPETA_PIEZAS = fileURLToPath(new URL('./piezas/', import.meta.url));
@@ -89,6 +89,19 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
     ...(leerConfig().autoPublicar?.activo !== false ? { puntosParaClip: 6, maxPorDirecto: 30, minutosEntreClips: 3, minimoMejorMomento: 5 } : {}),
   });
   const MUERTE = /muer[eit]|muerte|derrot|game ?over|ca[ií]d[oa]|perdi[oó]|reaparec/i;
+  // Modo shooter (Warzone, Call of Duty…): la acción está en letras chiquitas (bajas, "+puntos", escuadrón
+  // eliminado), así que además de las imágenes chicas se manda una grande, y la calificación busca bajas.
+  const SHOOTER = /warzone|call of duty|\bcod\b|battlefield|apex|fortnite|valorant|overwatch|pubg|delta force|the finals|rainbow six|counter-?strike|marvel rivals|xdefiant|halo|destiny/i;
+  const esShooter = () => SHOOTER.test(datos.actual().juego ?? '');
+  async function imagenGrande() {
+    try {
+      const rutas = captura.pedazos(25);
+      const ruta = rutas.at(-2) ?? rutas.at(-1); // el último puede estar a medio grabar
+      if (!ruta) return null;
+      const jpg = await cuadroDe(leerConfig(), ruta, 9, 1280);
+      return { mime: 'image/jpeg', base64: jpg.toString('base64') };
+    } catch { return null; }
+  }
   let destacados = []; // lo más fuerte del directo (por ejemplo, jefes vencidos), para el título del resumen
 
   // ---------- revisión de lo ya grabado: ¿cuándo terminó la pelea y quién ganó? ----------
@@ -268,20 +281,27 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
     const aburrido = ultimos.length === 2 && ultimos.every((m) => m.puntos <= 3);
     const espera = jefe ? c.segundosRevisionJefe * 1000 - 5_000 : aburrido ? 240_000 : 90_000;
     if (evaluando || Date.now() - ultimaEvaluacion < espera) return;
-    const fotos = captura.recientes(5);
+    const shooter = esShooter();
+    const fotos = captura.recientes(shooter ? 3 : 5);
     if (!fotos.length) return;
     evaluando = true;
     ultimaEvaluacion = Date.now();
     const d = datos.actual();
     try {
+      const grande = shooter ? await imagenGrande() : null;
       const r = await preguntarIA({
         sistema: 'Eres editor de videos cortos de videojuegos para TikTok y YouTube Shorts. Calificas que tan buen clip seria un momento de un directo.',
-        imagenes: fotos,
+        imagenes: grande ? [...fotos, grande] : fotos,
         texto:
           `Juego: ${d.juego}. Estas son imagenes de los ultimos segundos del directo (la ultima es la mas reciente). Motivo de la revision: ${motivo}.\n` +
           'Califica del 1 al 10 que tan atractivo seria como clip corto para gente que NO conoce el canal: ' +
-          '9-10 = pelea de jefe intensa, victoria o muerte espectacular, algo chistoso o sorprendente; 6-8 = combate con accion, descubrimiento o zona impresionante; ' +
-          '1-5 = menus, mapa, inventario, caminar, dialogos, pantallas de carga o nada pasando.\n' +
+          (shooter
+            ? (grande ? 'La ultima imagen es grande: usala para leer los textos chicos de la pantalla. ' : '') +
+              'Es un juego de disparos: busca en la pantalla el registro de bajas/eliminaciones, calaveras, marcadores de impacto, "+puntos", medallas, "escuadron eliminado", rachas o "victoria/ganador". ' +
+              '9-10 = varias bajas seguidas, escuadron eliminado, victoria de la partida, pelea de jefe intensa, jugada o muerte espectacular, algo chistoso; 6-8 = una baja, tiroteo cercano, ganar el gulag o una pelea intensa; ' +
+              '4-5 = disparos sin bajas, persecucion o caida en paracaidas en zona caliente; 1-3 = lobby, menus, mapa, saqueo tranquilo, caminar, pantalla de muerte sin accion o espectador.\n'
+            : '9-10 = pelea de jefe intensa, victoria o muerte espectacular, algo chistoso o sorprendente; 6-8 = combate con accion, descubrimiento o zona impresionante; ' +
+              '1-5 = menus, mapa, inventario, caminar, dialogos, pantallas de carga o nada pasando.\n') +
           (jefe ? `IMPORTANTE: hay una pelea en curso contra el jefe ${jefe.nombre || '(sin nombre)'} (ultima vida vista: ${jefe.vida}%). Puede tener varias fases y cambiar de sala.\n` : '') +
           'Devuelve SOLO un JSON: {"puntos": numero, "que": "lo que pasa, en 3 a 8 palabras, en espanol", ' +
           '"jefe": true si se ve una pelea contra un jefe (barra de vida grande de jefe), si no false, ' +
@@ -356,9 +376,10 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
     inicioVentana = ahora;
     if (ultimoClipHecho > desde) return; // ya salió algún clip en este rato
     // Solo momentos que todavía estén grabados (se guardan 35 min).
-    const mejor = momentos.filter((m) => m.hora > desde && ahora - m.hora < 33 * 60_000 && !m.clip && m.puntos >= c.minimoMejorMomento)
+    const minimo = esShooter() ? Math.min(3, c.minimoMejorMomento) : c.minimoMejorMomento; // en shooters, siempre el mejor del rato
+    const mejor = momentos.filter((m) => m.hora > desde && ahora - m.hora < 33 * 60_000 && !m.clip && m.puntos >= minimo)
       .sort((a, b) => b.puntos - a.puntos || b.hora - a.hora)[0];
-    if (!mejor) { log(`🎬 En los últimos ${c.minutosMejorMomento} min no hubo un momento de al menos ${c.minimoMejorMomento}/10 para clip`, { parte: 'clips' }); return; }
+    if (!mejor) { log(`🎬 En los últimos ${c.minutosMejorMomento} min no hubo un momento de al menos ${minimo}/10 para clip`, { parte: 'clips' }); return; }
     log(`🎬 Mejor momento de los últimos ${c.minutosMejorMomento} min (${mejor.puntos}/10): ${mejor.que}`, { parte: 'clips' });
     const item = await clips.crear(`mejor momento del rato: ${mejor.que}`, {
       puntos: mejor.puntos, que: mejor.que, saltarEspera: true,

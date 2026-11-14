@@ -6,9 +6,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { lista as bandeja, actualizar, CARPETA_CLIPS } from './bandeja.js';
 import { publicarEn, confirmar, destinosListos, NOMBRES, xPorBuffer, canalesBuffer, bufferConfigurado, esDeBuffer, buscarPostBuffer } from './publicar.js';
-import { log, marcar } from './estado.js';
+import { log, marcar, verPartes } from './estado.js';
 
 const ARCHIVO = new URL('./publicacion.json', import.meta.url);
+// ¿El error fue por falta de internet? Esos no cuentan como intento: se espera a que vuelva la red.
+const RED = /fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|UND_ERR_CONNECT|UND_ERR_SOCKET|socket hang up|network/i;
+const esDeRed = (err) => RED.test(`${err?.message ?? ''} ${err?.cause?.code ?? ''} ${err?.cause?.message ?? ''}`);
+const sinInternet = () => verPartes().find((x) => x.id === 'internet')?.estado === 'error';
 const HORA = 3600_000;
 const hoy = () => new Date().toLocaleDateString('en-CA'); // AAAA-MM-DD en tu hora local
 const mes = () => hoy().slice(0, 7);
@@ -167,8 +171,53 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     avisar('🎣 Video gancho de hoy', `${item.titulo}\nSale en tus redes porque hoy no hubo directo.`, { abrir: `${urlApp()}#publicar`, clave: 'gancho-' + hoy() });
   }
 
+  // Lo que falló por falta de internet (en las últimas 48 h) vuelve a la fila, espaciado como siempre.
+  // Así, después de un apagón o un corte de internet, nada se queda atrasado para siempre.
+  function recuperarCaidos() {
+    const recientes = s.cola.filter((e) => e.cuando > Date.now() - 48 * HORA);
+    const recuperados = [];
+    for (const e of recientes) {
+      let tocado = false;
+      for (const [destino, d] of Object.entries(e.destinos)) {
+        if (d.recuperado) continue; // se recupera una sola vez (si vuelve a fallar, ya no es por la red)
+        const porRed = RED.test(d.error ?? '') || /Sin internet|No pude comprobar en Buffer|Tardó demasiado|Buffer tardó/i.test(d.error ?? '');
+        if (d.estado === 'error' && porRed) { Object.assign(d, { estado: 'pendiente', intentos: 0, siguiente: 0 }); d.recuperado = true; tocado = true; }
+        // Buffer: si quedó "dudoso" y tiene su número de post, se vuelve a confirmar (no se reenvía).
+        else if (d.estado === 'dudoso' && d.info?.id && d.info?.canal) { Object.assign(d, { estado: 'enviado', confirmado: false, hora: Date.now() - 9 * 60_000 }); d.recuperado = true; tocado = true; }
+        else if (d.estado === 'dudoso' && esDeBuffer(destino) && /Tardó demasiado/i.test(d.error ?? '')) { Object.assign(d, { estado: 'pendiente', intentos: 1, siguiente: 0 }); d.recuperado = true; tocado = true; }
+      }
+      if (tocado) { e.avisado = false; if (Object.values(e.destinos).some((d) => d.estado === 'pendiente')) recuperados.push(e); }
+    }
+    if (!recuperados.length) return;
+    log(`🔁 Volvió el internet: ${recuperados.length} video(s) que no pudieron salir vuelven a la fila`);
+    avisar('🔁 Publicaciones retomadas', `${recuperados.map((e) => e.titulo).join('\n')}\nNo pudieron salir por falta de internet; ya vuelven a la fila.`, { abrir: `${urlApp()}#publicar`, clave: 'retomadas-' + hoy() });
+    guardar();
+  }
+
+  // Si se juntaron varios atrasados (corte de internet, PC apagada), sale uno ya y los demás cada N horas.
+  function espaciarAtrasados() {
+    const sep = cfg().horasEntre * HORA;
+    const ahora = Date.now();
+    const atrasados = s.cola
+      .filter((e) => e.cuando <= ahora && !e.manual && Object.values(e.destinos).every((d) => d.estado === 'pendiente'))
+      .sort((a, b) => a.cuando - b.cuando);
+    if (atrasados.length < 2) return;
+    let t = ahora;
+    for (const e of atrasados.slice(1)) {
+      t += sep;
+      e.cuando = t;
+      actualizar(e.itemId, { programado: new Date(t).toISOString() });
+      log(`⏱️ "${e.titulo}" se había atrasado: sale a las ${new Date(t).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' })}`);
+    }
+    guardar();
+  }
+
   async function publicarPendientes() {
     const config = leerConfig();
+    if (sinInternet()) return; // sin red no se gasta ningún intento
+    recuperarCaidos();
+    espaciarAtrasados();
+    reacomodarSilencio();
     for (const e of s.cola) {
       if (e.cuando > Date.now()) continue;
       const item = bandeja().find((x) => x.id === e.itemId);
@@ -179,7 +228,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
           const r = await confirmar(destino, d.info).catch(() => ({ estado: 'desconocido' }));
           if (r.estado === 'sent') { d.estado = 'ok'; d.url = r.url ?? d.url; d.confirmado = true; actualizar(item.id, { publicado: { [destino]: d.url || true } }); }
           else if (r.estado === 'error') { d.estado = 'pendiente'; d.intentos++; d.error = r.error; d.siguiente = Date.now() + 20 * 60_000; log(`⚠️ ${NOMBRES[destino]} rechazó "${item.titulo}": ${r.error}`, { nivel: 'aviso' }); }
-          else if (Date.now() - d.hora > 2 * HORA) { d.confirmado = true; d.estado = 'dudoso'; log(`❔ No pude confirmar si "${item.titulo}" salió en ${NOMBRES[destino]}; revísalo en la app de ${NOMBRES[destino]}`, { nivel: 'aviso' }); }
+          else if (Date.now() - d.hora > 2 * HORA && !sinInternet()) { d.confirmado = true; d.estado = 'dudoso'; log(`❔ No pude confirmar si "${item.titulo}" salió en ${NOMBRES[destino]}; revísalo en la app de ${NOMBRES[destino]}`, { nivel: 'aviso' }); }
           continue;
         }
         if (d.estado !== 'pendiente' || (d.siguiente ?? 0) > Date.now()) continue;
@@ -189,6 +238,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
         if (esDeBuffer(destino)) {
           let previo = null;
           try { previo = await buscarPostBuffer(destino, item, config); } catch (err) {
+            if (esDeRed(err)) { d.error = 'Sin internet; se publica cuando vuelva'; d.siguiente = Date.now() + 5 * 60_000; guardar(); continue; }
             if (yaIntentado) { // no se puede comprobar: mejor no arriesgar a duplicarlo; se vuelve a revisar en 20 min
               d.intentos++; d.error = 'No pude comprobar en Buffer si ya salió: ' + err.message; d.siguiente = Date.now() + 20 * 60_000;
               log(`⚠️ ${NOMBRES[destino]}: no pude comprobar si "${item.titulo}" ya está en Buffer; no lo reenvío todavía`, { nivel: 'aviso' });
@@ -211,6 +261,18 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
           log(`📤 ${NOMBRES[destino]}: "${item.titulo}" ${r.pendiente ? 'enviado (confirmando)' : 'publicado'}`);
           marcar('publicar', 'ok', `Último: ${NOMBRES[destino]} · ${item.titulo}`);
         } catch (err) {
+          // Sin internet: no cuenta como intento; se vuelve a probar cada 5 min hasta que regrese la red.
+          if (esDeRed(err) && !(err.name === 'TimeoutError')) {
+            d.error = 'Sin internet; se publica cuando vuelva'; d.siguiente = Date.now() + 5 * 60_000;
+            log(`📴 Sin internet: "${item.titulo}" sale en ${NOMBRES[destino]} cuando vuelva la red`, { nivel: 'aviso' });
+            guardar(); continue;
+          }
+          // En Buffer un tiempo agotado no es riesgo: antes de reenviar se revisa si ya existe (no se duplica).
+          if ((err.name === 'TimeoutError' || /timeout|aborted/i.test(err.message)) && esDeBuffer(destino)) {
+            d.intentos++; d.error = 'Buffer tardó en responder; reviso y reintento'; d.siguiente = Date.now() + 10 * 60_000;
+            if (d.intentos >= 3) d.estado = 'error';
+            guardar(); continue;
+          }
           // Si se cortó la espera, quizá sí se publicó: no se reintenta (para no publicarlo dos veces).
           if (err.name === 'TimeoutError' || /timeout|aborted/i.test(err.message)) {
             d.estado = 'dudoso';

@@ -168,6 +168,24 @@ export async function actualizarVideo({ id, titulo, descripcion, etiquetas = [] 
   });
 }
 
+// Deja un video en privado (los directos guardados: casi no tienen vistas y son los que se llevan reclamos por la música de los juegos).
+export async function ponerPrivado(id) {
+  await api('videos?part=status', { metodo: 'PUT', unidades: 50, cuerpo: { id, status: { privacyStatus: 'private', selfDeclaredMadeForKids: false } } });
+}
+
+// Directos ya terminados que siguen públicos (para pasarlos a privado una sola vez).
+export async function directosPublicos() {
+  const ids = [];
+  let pagina = '';
+  for (let i = 0; i < 5; i++) {
+    const r = await api(`liveBroadcasts?part=id,status&broadcastStatus=completed&broadcastType=all&maxResults=50${pagina ? '&pageToken=' + pagina : ''}`);
+    for (const b of r.items ?? []) if (b.status?.privacyStatus === 'public') ids.push(b.id);
+    pagina = r.nextPageToken;
+    if (!pagina) break;
+  }
+  return ids;
+}
+
 // Directo de YouTube que sigue activo (para retomarlo si el Centro se reinicia a media transmisión).
 export async function directoActivo() {
   const r = await api('liveBroadcasts?part=snippet,status&broadcastStatus=active&broadcastType=all&maxResults=5');

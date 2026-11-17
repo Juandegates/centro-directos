@@ -245,6 +245,31 @@ async function arreglarVideoYoutube(directo, { juego, titulo, minutos }) {
   log('📺 Le puse descripción y capítulos al directo guardado en YouTube');
 }
 
+// El directo guardado en YouTube queda en privado al terminar (sigue viéndose en vivo igual).
+// Así no queda público para reclamos por la música del juego. Si YouTube todavía lo está procesando, se reintenta.
+function privadoAlTerminar(id, intento = 1) {
+  setTimeout(() => youtube.ponerPrivado(id)
+    .then(() => log('🔒 El directo guardado en YouTube quedó en privado'))
+    .catch((e) => {
+      if (intento < 4) privadoAlTerminar(id, intento + 1);
+      else log('No pude dejar en privado el directo de YouTube: ' + e.message, { nivel: 'aviso' });
+    }), intento === 1 ? 4 * 60_000 : 15 * 60_000);
+}
+
+// Una sola vez: los directos viejos que siguen públicos pasan a privado.
+async function privatizarDirectosViejos() {
+  if ((ajustes().migraciones ?? []).includes('directos-privados') || leerConfig().youtube?.directosPrivados === false) return;
+  if (!youtube.configurado() || !youtube.tieneSesion()) return;
+  try {
+    const ids = await youtube.directosPublicos();
+    let hechos = 0;
+    for (const id of ids) { try { await youtube.ponerPrivado(id); hechos++; } catch (e) { log(`No pude dejar en privado un directo viejo (${id}): ${e.message}`, { nivel: 'aviso' }); } }
+    guardarAjustes({ migraciones: [...(ajustes().migraciones ?? []), 'directos-privados'] });
+    log(`🔒 Directos guardados en YouTube que pasé a privado: ${hechos} de ${ids.length}`);
+    if (hechos) avisar('🔒 Directos de YouTube en privado', `Pasé ${hechos} directo(s) guardado(s) a privado. Los nuevos quedarán en privado solos al terminar.`, { clave: 'directos-privados' });
+  } catch (e) { log('No pude revisar los directos viejos de YouTube: ' + e.message, { nivel: 'aviso' }); }
+}
+
 async function sincronizarTituloYoutube(titulo) {
   if (!yt.directo || Date.now() - yt.ultimoTitulo < 60_000) return;
   yt.ultimoTitulo = Date.now();
@@ -509,6 +534,7 @@ async function alTerminar() {
     setTimeout(() => arreglarVideoYoutube(directoYt, { juego: d.juego, titulo: d.titulo, minutos })
       .catch((e) => log('No pude ponerle descripción al video de YouTube: ' + e.message, { nivel: 'aviso' })), 120_000);
   }
+  if (directoYt && leerConfig().youtube?.directosPrivados !== false) privadoAlTerminar(directoYt.id);
 }
 
 // Bots de otros servicios que escriben en tu chat: el Centro no les contesta ni los cuenta para clips.
@@ -604,6 +630,8 @@ async function iniciar() {
   });
 
   prepararKick().catch(() => {});
+  // Si no estás en vivo, revisa (una sola vez) los directos viejos que siguen públicos en YouTube.
+  setTimeout(() => { if (!ctx?.datos.actual().enVivo) privatizarDirectosViejos(); }, 90_000);
 }
 
 // Mensajes del chat de Kick (llegan como avisos firmados por Kick).

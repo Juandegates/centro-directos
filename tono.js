@@ -3,7 +3,7 @@
 // ("lo conseguí… pero fue demasiado fácil"), con sarcasmo duro, para generar polémica con fundamento.
 // Solo afecta a los videos (clips, resumen, gancho); el bot del chat sigue normal.
 // Se cambia en config.json → "tonoCritico": ["grand theft auto", "gta"]  (lista vacía = apagado).
-const PREDETERMINADO = ['grand theft auto', 'gta']; // cualquier GTA (V, VI, Online…), sin importar cómo lo nombre Twitch
+const PREDETERMINADO = ['grand theft auto', 'gta', 'gta5', 'gta6']; // cualquier GTA (V, VI, Online…), sin importar cómo lo nombre Twitch
 
 export function esCritico(juego, config = {}) {
   const lista = Array.isArray(config.tonoCritico) ? config.tonoCritico : PREDETERMINADO;

@@ -12,6 +12,7 @@ import { recortar } from './promos.js';
 import { agregar, nuevoId, lista as bandeja, CARPETA_CLIPS } from './bandeja.js';
 import { preguntarClaude, claudeDisponible } from './claude.js';
 import { preguntarIA } from './ia.js';
+import { esCritico, CRITERIO_CRITICO, REGLAS_TEXTO_CRITICO, REVISION_CRITICA } from './tono.js';
 import { infoVideo } from './editor.js';
 import { log, marcar } from './estado.js';
 
@@ -160,7 +161,8 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     };
   }
 
-  const criterio =
+  const critico = (juego) => esCritico(juego ?? datos.actual().juego, leerConfig());
+  const criterioNormal =
     'QUE HACE UN BUEN VIDEO CORTO (metroidvania en PS5, para gente que NO conoce el canal):\n' +
     '- SI: jefe vencido (mejor si costo muchos intentos), muerte epica o absurda, habilidad o arma nueva, secreto o cuarto escondido, escape por un pelo, algo chistoso o sorprendente, una zona visualmente impresionante con accion.\n' +
     '- NO: menus, mapa, inventario, pantallas de carga, caminar sin que pase nada, dialogos largos, pantallas negras o borrosas.\n' +
@@ -170,6 +172,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     `Escribes en espanol mexicano natural, en primera persona como el streamer (Juan, canal ${canalLogin || 'juangates'}). Juego: ${juego}.\n` +
     'Para cada video escribe: "gancho" (frase escrita ENCIMA del video en los primeros segundos, max 32 caracteres, sin hashtags ni emojis, pregunta o reaccion), ' +
     '"titulo" (max 60), "tituloShorts" (max 85, con el nombre del juego, sin hashtags), "tiktok" (descripcion con 4 a 6 hashtags, max 180), "x" (texto para X, max 200, sin links).\n' +
+    (critico(juego) ? REGLAS_TEXTO_CRITICO : '') +
     `VIDEOS QUE YA PUBLICASTE (no repitas sus frases ni su estructura; varia el estilo):\n${publicadosRecientes()}\n`;
 
   // ---------- Selección: Claude elige los mejores ----------
@@ -192,7 +195,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     const prompt =
       'Eres el editor de videos cortos (TikTok y YouTube Shorts) del canal de un streamer mexicano de PS5.\n' +
       `${contexto}\n\nAbre con la herramienta Read CADA imagen de esta carpeta (son hojas de cuadros de cada video candidato) y miralas con calma antes de decidir:\n${lineas.join('\n')}\n\n` +
-      criterio + reglasTextos(datos.actual().juego) +
+      (critico(validas[0]?.juego) ? CRITERIO_CRITICO : criterioNormal) + reglasTextos(validas[0]?.juego ?? datos.actual().juego) +
       `\nElige los ${cuantos} MEJORES candidatos (y hasta 2 de respaldo, por si alguno falla), del mejor al peor. ` +
       'Para cada uno decide el recorte: "inicio" y "fin" en segundos dentro de ese video, para que dure entre 15 y 50 s, empiece justo antes de la accion y termine poco despues (no cortes el final de la pelea o la caida).\n' +
       'Responde SOLO con un JSON: {"elegidos":[{"codigo":"C3","inicio":8,"fin":44,"porque":"...","gancho":"...","titulo":"...","tituloShorts":"...","tiktok":"...","x":"..."}]}';
@@ -234,7 +237,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
   }
 
   // Revisión final: Claude ve el video vertical ya armado (con el texto encima) y decide.
-  async function revisarFinal({ carpeta, textos, que }) {
+  async function revisarFinal({ carpeta, textos, que, juego: juegoRevision }) {
     const config = leerConfig();
     if (!claudeDisponible(config) || config.autoPublicar?.revisionFinal === false) return { publicar: true };
     const vertical = join(carpeta, 'vertical.mp4');
@@ -247,6 +250,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
         'Eres el revisor final antes de publicar un video corto en TikTok y YouTube Shorts del canal de un streamer mexicano de PS5.\n' +
         'Abre con Read la imagen video.jpg (4 cuadros del video vertical ya terminado, con su texto encima) y revisa:\n' +
         '1) que el texto escrito encima y el titulo tengan logica con lo que se ve; 2) que no se repita con videos anteriores; 3) que el video no sea puro menu, mapa, carga o pantalla negra; 4) que el texto se lea bien.\n' +
+        (critico(juegoRevision) ? REVISION_CRITICA + REGLAS_TEXTO_CRITICO : '') +
         `Lo que se cree que pasa: ${que || '(sin dato)'}\nTextos: ${JSON.stringify({ gancho: textos.gancho, titulo: textos.titulo, tituloShorts: textos.tituloShorts, tiktok: textos.tiktok, x: textos.x })}\n` +
         `Videos ya publicados:\n${publicadosRecientes()}\n\n` +
         'Responde SOLO con un JSON: {"publicar": true} si esta bien; {"publicar": true, "corregir": {"gancho":"...","titulo":"...","tituloShorts":"...","tiktok":"...","x":"..."}} si solo hay que mejorar textos (pon solo los que cambian); o {"publicar": false, "motivo": "..."} si el video no sirve.';
@@ -268,7 +272,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     let textos = textosFinales({ ...e.textos, juego: e.opcion.juego });
     try {
       await armarClip({ entrada: e.opcion.ruta, inicio: e.inicio, fin: e.fin, textos, carpeta });
-      const rev = await revisarFinal({ carpeta, textos, que: e.opcion.que || e.opcion.info });
+      const rev = await revisarFinal({ carpeta, textos, que: e.opcion.que || e.opcion.info, juego: e.opcion.juego });
       if (!rev.publicar) {
         e.descartado = true;
         log(`🤖 Claude descartó un video: ${rev.motivo}`);
@@ -411,7 +415,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     async revisarItem(item) {
       const carpeta = join(CARPETA_CLIPS, item.id);
       const t = { gancho: item.gancho, titulo: item.titulo, tituloShorts: item.tituloShorts, tiktok: item.textoTikTok, x: item.textoX };
-      const r = await revisarFinal({ carpeta, textos: t, que: item.motivo });
+      const r = await revisarFinal({ carpeta, textos: t, que: item.motivo, juego: item.juego });
       if (!r.publicar) return { publicar: false, motivo: r.motivo };
       if (!r.corregir) return { publicar: true };
       const f = textosFinales({ ...t, ...r.corregir, gancho: t.gancho, tiktok: r.corregir.tiktok ?? String(t.tiktok ?? '').split('\n')[0], juego: item.juego });

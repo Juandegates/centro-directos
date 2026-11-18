@@ -19,6 +19,7 @@ import { medirVolumen, correrFfmpeg, cuadroDe } from './herramientas.js';
 export const CARPETA_PIEZAS = fileURLToPath(new URL('./piezas/', import.meta.url));
 const MAX_PIEZAS = 40;
 import { preguntarIA } from './ia.js';
+import { esCritico, RUBRICA_CRITICA } from './tono.js';
 import { log } from './estado.js';
 
 const mediana = (xs) => {
@@ -281,7 +282,8 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
     const aburrido = ultimos.length === 2 && ultimos.every((m) => m.puntos <= 3);
     const espera = jefe ? c.segundosRevisionJefe * 1000 - 5_000 : aburrido ? 240_000 : 90_000;
     if (evaluando || Date.now() - ultimaEvaluacion < espera) return;
-    const shooter = esShooter();
+    const critico = esCritico(datos.actual().juego, leerConfig());
+    const shooter = esShooter() || critico; // en modo crítico también va la imagen grande (para ver los detalles)
     const fotos = captura.recientes(shooter ? 3 : 5);
     if (!fotos.length) return;
     evaluando = true;
@@ -295,7 +297,9 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
         texto:
           `Juego: ${d.juego}. Estas son imagenes de los ultimos segundos del directo (la ultima es la mas reciente). Motivo de la revision: ${motivo}.\n` +
           'Califica del 1 al 10 que tan atractivo seria como clip corto para gente que NO conoce el canal: ' +
-          (shooter
+          (critico
+            ? (grande ? 'La ultima imagen es grande: usala para ver los detalles. ' : '') + RUBRICA_CRITICA
+            : shooter
             ? (grande ? 'La ultima imagen es grande: usala para leer los textos chicos de la pantalla. ' : '') +
               'Es un juego de disparos: busca en la pantalla el registro de bajas/eliminaciones, calaveras, marcadores de impacto, "+puntos", medallas, "escuadron eliminado", rachas o "victoria/ganador". ' +
               '9-10 = varias bajas seguidas, escuadron eliminado, victoria de la partida, pelea de jefe intensa, jugada o muerte espectacular, algo chistoso; 6-8 = una baja, tiroteo cercano, ganar el gulag o una pelea intensa; ' +
@@ -376,7 +380,7 @@ export function crearMomentos({ captura, leerConfig, datos, clips }) {
     inicioVentana = ahora;
     if (ultimoClipHecho > desde) return; // ya salió algún clip en este rato
     // Solo momentos que todavía estén grabados (se guardan 35 min).
-    const minimo = esShooter() ? Math.min(3, c.minimoMejorMomento) : c.minimoMejorMomento; // en shooters, siempre el mejor del rato
+    const minimo = esShooter() || esCritico(datos.actual().juego, leerConfig()) ? Math.min(3, c.minimoMejorMomento) : c.minimoMejorMomento; // shooters y modo crítico: siempre el mejor del rato
     const mejor = momentos.filter((m) => m.hora > desde && ahora - m.hora < 33 * 60_000 && !m.clip && m.puntos >= minimo)
       .sort((a, b) => b.puntos - a.puntos || b.hora - a.hora)[0];
     if (!mejor) { log(`🎬 En los últimos ${c.minutosMejorMomento} min no hubo un momento de al menos ${minimo}/10 para clip`, { parte: 'clips' }); return; }

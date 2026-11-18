@@ -2,13 +2,18 @@
 // —bugs, NPCs repetitivos, automatismos, malos controles, misiones simples— y también critican los logros
 // ("lo conseguí… pero fue demasiado fácil"), con sarcasmo duro, para generar polémica con fundamento.
 // Solo afecta a los videos (clips, resumen, gancho); el bot del chat sigue normal.
-// Se cambia en config.json → "tonoCritico": ["grand theft auto vi", "gta vi"]  (lista vacía = apagado).
-const PREDETERMINADO = ['grand theft auto vi', 'gta vi', 'gta 6', 'gta6']; // GTA V y los demás siguen normal
+// Se cambia en config.json → "tonoCritico": ["grand theft auto", "gta"]  (lista vacía = apagado).
+const PREDETERMINADO = ['grand theft auto', 'gta']; // cualquier GTA (V, VI, Online…), sin importar cómo lo nombre Twitch
 
 export function esCritico(juego, config = {}) {
   const lista = Array.isArray(config.tonoCritico) ? config.tonoCritico : PREDETERMINADO;
   const j = String(juego ?? '').toLowerCase();
-  return lista.some((p) => p && j.includes(String(p).toLowerCase()));
+  return lista.some((p) => {
+    const x = String(p ?? '').toLowerCase().trim();
+    if (!x) return false;
+    // Palabras cortas (como "gta") cuentan solo como palabra completa: "GTA VI" sí, "Gtavania" no.
+    return x.length <= 4 ? new RegExp(`(^|[^a-z0-9])${x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`).test(j) : j.includes(x);
+  });
 }
 
 // Todo lo que se puede criticar con fundamento (se usa en las tres etapas).

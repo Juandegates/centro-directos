@@ -12,6 +12,8 @@ const ARCHIVO = new URL('./publicacion.json', import.meta.url);
 // ¿El error fue por falta de internet? Esos no cuentan como intento: se espera a que vuelva la red.
 const RED = /fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|UND_ERR_CONNECT|UND_ERR_SOCKET|socket hang up|network/i;
 const esDeRed = (err) => RED.test(`${err?.message ?? ''} ${err?.cause?.code ?? ''} ${err?.cause?.message ?? ''}`);
+// Límite diario de YouTube (por Buffer): son 2 Shorts en 24 h para tu canal. Los demás esperan su turno.
+const LIMITE_YT = /maximum number of posts|daily posting limit|posting limit/i;
 const sinInternet = () => verPartes().find((x) => x.id === 'internet')?.estado === 'error';
 const HORA = 3600_000;
 const hoy = () => new Date().toLocaleDateString('en-CA'); // AAAA-MM-DD en tu hora local
@@ -171,6 +173,32 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     avisar('🎣 Video gancho de hoy', `${item.titulo}\nSale en tus redes porque hoy no hubo directo.`, { abrir: `${urlApp()}#publicar`, clave: 'gancho-' + hoy() });
   }
 
+  // ---------- Límite diario de YouTube ----------
+  const maxYoutube = () => Math.max(1, Number(cfg().maxYoutubeDia ?? 2));
+  // Horas (ms) de los Shorts que salieron o se mandaron a YouTube en las últimas 24 h.
+  const salidasYoutube = () => s.cola.flatMap((e) => {
+    const d = e.destinos.youtube;
+    return d && ['ok', 'enviado', 'dudoso'].includes(d.estado) && d.hora && Date.now() - d.hora < 24 * HORA ? [d.hora] : [];
+  }).sort((a, b) => a - b);
+  // ¿Cuándo se libera el siguiente lugar en YouTube? (null = hay lugar ya)
+  function turnoYoutube() {
+    const h = salidasYoutube();
+    if (h.length < maxYoutube()) return null;
+    return fueraDeSilencio(h[h.length - maxYoutube()] + 24 * HORA + 10 * 60_000);
+  }
+  // Si el turno de YouTube queda más de 36 h después de lo programado, ese video ya no va a YouTube (se queda en las demás redes).
+  function esperarTurnoYoutube(e, d, item) {
+    const turno = turnoYoutube() ?? Date.now() + 3 * HORA;
+    if (turno - e.cuando > 36 * HORA) {
+      d.estado = 'cancelado'; d.error = `Sin lugar en YouTube (máx. ${maxYoutube()} Shorts al día); salió en las demás redes`;
+      log(`⏭️ YouTube Shorts: "${item.titulo}" se queda fuera (límite de ${maxYoutube()} al día); sí sale en las demás redes`);
+    } else {
+      d.siguiente = turno; d.error = `Límite de YouTube (${maxYoutube()} al día): sale el ${new Date(turno).toLocaleString('es-MX', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`;
+      log(`⏳ YouTube Shorts: "${item.titulo}" espera su turno (límite de ${maxYoutube()} al día)`);
+    }
+    guardar();
+  }
+
   // Lo que falló por falta de internet (en las últimas 48 h) vuelve a la fila, espaciado como siempre.
   // Así, después de un apagón o un corte de internet, nada se queda atrasado para siempre.
   function recuperarCaidos() {
@@ -180,7 +208,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
       let tocado = false;
       for (const [destino, d] of Object.entries(e.destinos)) {
         if (d.recuperado) continue; // se recupera una sola vez (si vuelve a fallar, ya no es por la red)
-        const porRed = RED.test(d.error ?? '') || /Sin internet|No pude comprobar en Buffer|Tardó demasiado|Buffer tardó/i.test(d.error ?? '');
+        const porRed = RED.test(d.error ?? '') || LIMITE_YT.test(d.error ?? '') || /Sin internet|No pude comprobar en Buffer|Tardó demasiado|Buffer tardó/i.test(d.error ?? '');
         if (d.estado === 'error' && porRed) { Object.assign(d, { estado: 'pendiente', intentos: 0, siguiente: 0 }); d.recuperado = true; tocado = true; }
         // Buffer: si quedó "dudoso" y tiene su número de post, se vuelve a confirmar (no se reenvía).
         else if (d.estado === 'dudoso' && d.info?.id && d.info?.canal) { Object.assign(d, { estado: 'enviado', confirmado: false, hora: Date.now() - 9 * 60_000 }); d.recuperado = true; tocado = true; }
@@ -227,11 +255,13 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
           // Buffer: ¿ya salió de verdad?
           const r = await confirmar(destino, d.info).catch(() => ({ estado: 'desconocido' }));
           if (r.estado === 'sent') { d.estado = 'ok'; d.url = r.url ?? d.url; d.confirmado = true; actualizar(item.id, { publicado: { [destino]: d.url || true } }); }
+          else if (r.estado === 'error' && LIMITE_YT.test(r.error ?? '')) { d.estado = 'pendiente'; d.info = null; esperarTurnoYoutube(e, d, item); }
           else if (r.estado === 'error') { d.estado = 'pendiente'; d.intentos++; d.error = r.error; d.siguiente = Date.now() + 20 * 60_000; log(`⚠️ ${NOMBRES[destino]} rechazó "${item.titulo}": ${r.error}`, { nivel: 'aviso' }); }
           else if (Date.now() - d.hora > 2 * HORA && !sinInternet()) { d.confirmado = true; d.estado = 'dudoso'; log(`❔ No pude confirmar si "${item.titulo}" salió en ${NOMBRES[destino]}; revísalo en la app de ${NOMBRES[destino]}`, { nivel: 'aviso' }); }
           continue;
         }
         if (d.estado !== 'pendiente' || (d.siguiente ?? 0) > Date.now()) continue;
+        if (destino === 'youtube' && turnoYoutube() !== null) { esperarTurnoYoutube(e, d, item); continue; }
         if (d.intentos >= 3) { d.estado = 'error'; continue; }
         // Antes de crear un post en Buffer: ¿ya existe uno igual? (un intento anterior que sí llegó)
         const yaIntentado = d.intentos > 0 || s.cola.some((o) => o !== e && o.itemId === e.itemId && o.destinos[destino]);
@@ -254,13 +284,14 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
         }
         try {
           const r = await publicarEn(destino, item, { config, carpetaClips: CARPETA_CLIPS });
-          d.info = r; d.url = r.url ?? null; d.hora = Date.now();
+          d.info = r; d.url = r.url ?? null; d.hora = Date.now(); d.error = null;
           if (r.pendiente) d.estado = 'enviado';
           else { d.estado = 'ok'; actualizar(item.id, { publicado: { [destino]: r.url || true } }); }
           if (destino === 'x' && !xPorBuffer()) { s.xMes.usados++; }
           log(`📤 ${NOMBRES[destino]}: "${item.titulo}" ${r.pendiente ? 'enviado (confirmando)' : 'publicado'}`);
           marcar('publicar', 'ok', `Último: ${NOMBRES[destino]} · ${item.titulo}`);
         } catch (err) {
+          if (destino === 'youtube' && LIMITE_YT.test(err.message)) { esperarTurnoYoutube(e, d, item); continue; }
           // Sin internet: no cuenta como intento; se vuelve a probar cada 5 min hasta que regrese la red.
           if (esDeRed(err) && !(err.name === 'TimeoutError')) {
             d.error = 'Sin internet; se publica cuando vuelva'; d.siguiente = Date.now() + 5 * 60_000;

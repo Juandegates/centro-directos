@@ -206,10 +206,11 @@ async function leerChatYoutube() {
       }
       primero = false;
       if (r.terminado) break;
-      // Cada lectura gasta cuota: cada 10 s si hay plática, cada 20 s si el chat lleva 3 min callado.
+      // Cada lectura gasta cuota de YouTube. Solo se lee seguido (cada 10 s) cuando alguien que no eres tú ni el bot
+      // escribió en los últimos 3 min; si nadie escribe, se revisa cada 90 s (lo justo para enterarse si alguien llega).
       const cy = leerConfig().youtube ?? {};
       const callado = Date.now() - ultimoMensajeYt > 3 * 60_000;
-      const seg = callado ? (cy.segundosChatCallado ?? 20) : (cy.segundosEntreLecturas ?? 10);
+      const seg = callado ? Math.max(90, cy.segundosSinGente ?? 90) : (cy.segundosEntreLecturas ?? 10);
       await new Promise((ok) => setTimeout(ok, Math.max(r.esperaMs, seg * 1000)));
     } catch (e) {
       marcar('chatYoutube', 'aviso', 'No pude leer el chat de YouTube; reintento', e.message);

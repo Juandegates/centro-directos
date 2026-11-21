@@ -122,6 +122,9 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
   let pendientes = [];
   let ultimoMensajeChat = Date.now();
   let ultimoAnimo = 0;
+  // En YouTube y Kick solo se "saca plática" si alguien (que no seas tú ni el bot) ya escribió en este directo:
+  // si no hay nadie, no se gasta IA ni cuota en hablarle a un chat vacío. En Twitch sigue igual.
+  let genteEnDirecto = false;
   const animos = []; // últimos mensajes para animar, para no empezar siempre igual
   let ocupado = false;
   const enviados = new Set(); // lo que mandó el bot, para reconocerlo cuando regresa por el chat
@@ -213,6 +216,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
     const espera = (a.minutosSinMensajes ?? 20) * 60_000;
     if (Date.now() - ultimoMensajeChat < espera || Date.now() - ultimoAnimo < espera) return;
     if (a.soloEnVivo && !datos.actual().enVivo) return;
+    if (plataforma !== 'twitch' && !genteEnDirecto) return;
     ocupado = true;
     ultimoAnimo = Date.now();
     log('El chat está callado; mando algo para sacar plática…');
@@ -254,7 +258,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
   }, 15_000);
 
   return {
-    nuevoDirecto() { saludadosHoy = new Set(); seguidoresPendientes = []; },
+    nuevoDirecto() { saludadosHoy = new Set(); seguidoresPendientes = []; genteEnDirecto = false; },
     raid({ nombre, espectadores }) {
       ultimoMensajeChat = Date.now();
       return evento(
@@ -282,6 +286,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
         nombre = NOMBRE_PRUEBA;
         log(`🧪 Prueba (${NOMBRES[plataforma]}): ${texto}`);
       }
+      genteEnDirecto = true;
       registrar({ plataforma, nombre: prueba ? `${nombre} (tú)` : nombre, texto, tipo: 'gente' });
       const config = leerConfig();
       const palabra = texto.trim().split(/\s+/)[0].toLowerCase();

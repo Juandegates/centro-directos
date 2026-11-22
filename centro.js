@@ -276,6 +276,20 @@ function borrarAlTerminar(id, intento = 1) {
     }), intento === 1 ? 4 * 60_000 : 15 * 60_000);
 }
 
+// Una sola vez (lo pediste el 22 nov): se borran de YouTube todos los directos viejos que quedaron guardados.
+async function borrarDirectosViejos() {
+  if ((ajustes().migraciones ?? []).includes('directos-borrados') || (leerConfig().youtube?.directosGuardados ?? 'borrar') !== 'borrar') return;
+  if (!youtube.configurado() || !youtube.tieneSesion()) return;
+  try {
+    const ids = await youtube.directosTerminados();
+    let hechos = 0;
+    for (const id of ids) { try { if (await youtube.borrarVideo(id)) hechos++; } catch (e) { log(`No pude borrar un directo viejo (${id}): ${e.message}`, { nivel: 'aviso' }); } }
+    guardarAjustes({ migraciones: [...(ajustes().migraciones ?? []), 'directos-borrados'] });
+    log(`🗑️ Directos viejos borrados de YouTube: ${hechos} de ${ids.length}`);
+    if (hechos) avisar('🗑️ Directos viejos borrados de YouTube', `Borré ${hechos} directo(s) guardado(s). Los nuevos ya no se guardan.`, { clave: 'directos-borrados' });
+  } catch (e) { log('No pude revisar los directos viejos de YouTube: ' + e.message, { nivel: 'aviso' }); }
+}
+
 // Una sola vez: los directos viejos que siguen públicos pasan a privado.
 async function privatizarDirectosViejos() {
   if ((ajustes().migraciones ?? []).includes('directos-privados') || leerConfig().youtube?.directosPrivados === false) return;
@@ -656,7 +670,7 @@ async function iniciar() {
 
   prepararKick().catch(() => {});
   // Si no estás en vivo, revisa (una sola vez) los directos viejos que siguen públicos en YouTube.
-  setTimeout(() => { if (!ctx?.datos.actual().enVivo) privatizarDirectosViejos(); }, 90_000);
+  setTimeout(() => { if (!ctx?.datos.actual().enVivo) privatizarDirectosViejos().then(borrarDirectosViejos); }, 90_000);
 }
 
 // Mensajes del chat de Kick (llegan como avisos firmados por Kick).

@@ -179,6 +179,19 @@ export async function ponerPrivado(id) {
   await api('videos?part=status', { metodo: 'PUT', unidades: 50, cuerpo: { id, status: { privacyStatus: 'private', selfDeclaredMadeForKids: false } } });
 }
 
+// Todos los directos ya terminados que siguen en tu canal (cualquier privacidad).
+export async function directosTerminados() {
+  const ids = [];
+  let pagina = '';
+  for (let i = 0; i < 5; i++) {
+    const r = await api(`liveBroadcasts?part=id&broadcastStatus=completed&broadcastType=all&maxResults=50${pagina ? '&pageToken=' + pagina : ''}`);
+    for (const b of r.items ?? []) ids.push(b.id);
+    pagina = r.nextPageToken;
+    if (!pagina) break;
+  }
+  return ids;
+}
+
 // Directos ya terminados que siguen públicos (para pasarlos a privado una sola vez).
 export async function directosPublicos() {
   const ids = [];

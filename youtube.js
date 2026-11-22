@@ -98,7 +98,8 @@ export async function asegurarStream() {
   return { id: s.id, rtmp: `${s.cdn.ingestionInfo.ingestionAddress}/${s.cdn.ingestionInfo.streamName}` };
 }
 
-export async function crearDirecto({ titulo, descripcion, streamId }) {
+// sinGrabar: pide a YouTube que no grabe el directo (solo lo permite a algunos canales; si no, responde 403)
+export async function crearDirecto({ titulo, descripcion, streamId, sinGrabar = false }) {
   const inicio = new Date().toISOString();
   const b = await api('liveBroadcasts?part=snippet,status,contentDetails', {
     metodo: 'POST',
@@ -106,7 +107,7 @@ export async function crearDirecto({ titulo, descripcion, streamId }) {
     cuerpo: {
       snippet: { title: titulo.slice(0, 100), description: descripcion.slice(0, 4900), scheduledStartTime: inicio },
       status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
-      contentDetails: { enableAutoStart: true, enableAutoStop: true, latencyPreference: 'low', enableDvr: true, monitorStream: { enableMonitorStream: false } },
+      contentDetails: { enableAutoStart: true, enableAutoStop: true, latencyPreference: 'low', enableDvr: true, monitorStream: { enableMonitorStream: false }, ...(sinGrabar ? { recordFromStart: false } : {}) },
     },
   });
   await api(`liveBroadcasts/bind?id=${b.id}&part=id,contentDetails&streamId=${streamId}`, { metodo: 'POST', unidades: 50 });
@@ -166,6 +167,11 @@ export async function actualizarVideo({ id, titulo, descripcion, etiquetas = [] 
     unidades: 50,
     cuerpo: { id, snippet: { title: titulo.slice(0, 100), description: descripcion.slice(0, 4900), tags: etiquetas.slice(0, 15), categoryId: '20' } },
   });
+}
+
+// Borra un video del canal (el directo guardado). 404 = ya no existe (o nunca se grabó): cuenta como hecho.
+export async function borrarVideo(id) {
+  try { await api(`videos?id=${id}`, { metodo: 'DELETE', unidades: 50 }); return true; } catch (e) { if (e.status === 404) return false; throw e; }
 }
 
 // Deja un video en privado (los directos guardados: casi no tienen vistas y son los que se llevan reclamos por la música de los juegos).

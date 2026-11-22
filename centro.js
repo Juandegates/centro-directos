@@ -130,11 +130,20 @@ async function iniciarYoutube({ reanudar = false } = {}) {
     // Si el Centro se reinició a media transmisión, retomamos el mismo directo de YouTube.
     const previo = reanudar ? await youtube.directoActivo().catch(() => null) : null;
     if (previo) log('🔄 Retomo el mismo directo de YouTube');
-    yt.directo = previo ?? await youtube.crearDirecto({
+    const datosDirecto = {
       titulo: d.titulo || `Jugando ${d.juego} en PS5`,
       descripcion: `🎮 ${d.juego} en vivo desde la PS5.\n\nJuego: ${d.juego}\nHorario: ${d.horario}`,
       streamId: stream.id,
-    });
+    };
+    // Que YouTube no guarde el directo: primero se pide sin grabación; si tu canal no tiene ese permiso (403),
+    // se crea normal y al terminar se borra el video guardado.
+    const sinGuardar = (leerConfig().youtube?.directosGuardados ?? 'borrar') === 'borrar';
+    let creado = previo;
+    if (!creado && sinGuardar && !ajustes().ytSinGrabarNoPermitido) {
+      try { creado = await youtube.crearDirecto({ ...datosDirecto, sinGrabar: true }); log('📵 Directo de YouTube sin grabación (no se guardará)'); }
+      catch (e) { if (e.status !== 403) throw e; guardarAjustes({ ytSinGrabarNoPermitido: true }); log('YouTube no deja crear directos sin grabación en tu canal: lo borro al terminar'); }
+    }
+    yt.directo = creado ?? await youtube.crearDirecto(datosDirecto);
     marcar('youtube', 'ok', previo ? 'Directo de YouTube retomado' : 'Directo creado en YouTube');
     arrancarRelevo(stream.rtmp);
     leerChatYoutube();
@@ -254,6 +263,16 @@ function privadoAlTerminar(id, intento = 1) {
     .catch((e) => {
       if (intento < 4) privadoAlTerminar(id, intento + 1);
       else log('No pude dejar en privado el directo de YouTube: ' + e.message, { nivel: 'aviso' });
+    }), intento === 1 ? 4 * 60_000 : 15 * 60_000);
+}
+
+// El directo guardado se borra de YouTube al terminar (los clips salen de la grabación de tu PC, no de YouTube).
+function borrarAlTerminar(id, intento = 1) {
+  setTimeout(() => youtube.borrarVideo(id)
+    .then((existia) => log(existia ? '🗑️ Borré de YouTube el directo guardado' : '📵 El directo no se guardó en YouTube'))
+    .catch((e) => {
+      if (intento < 4) borrarAlTerminar(id, intento + 1);
+      else log('No pude borrar de YouTube el directo guardado: ' + e.message, { nivel: 'aviso' });
     }), intento === 1 ? 4 * 60_000 : 15 * 60_000);
 }
 
@@ -531,11 +550,16 @@ async function alTerminar() {
     ctx.calendario.programar();
     ctx.calendario.revisar().catch(() => {});
   }, 180_000);
-  if (directoYt && minutos >= 5) {
-    setTimeout(() => arreglarVideoYoutube(directoYt, { juego: d.juego, titulo: d.titulo, minutos })
-      .catch((e) => log('No pude ponerle descripción al video de YouTube: ' + e.message, { nivel: 'aviso' })), 120_000);
+  // ¿Qué pasa con el directo guardado en YouTube? "borrar" (predeterminado), "privado" o "publico".
+  const guardados = leerConfig().youtube?.directosGuardados ?? (leerConfig().youtube?.directosPrivados === false ? 'publico' : 'borrar');
+  if (directoYt && guardados === 'borrar') borrarAlTerminar(directoYt.id);
+  else {
+    if (directoYt && minutos >= 5) {
+      setTimeout(() => arreglarVideoYoutube(directoYt, { juego: d.juego, titulo: d.titulo, minutos })
+        .catch((e) => log('No pude ponerle descripción al video de YouTube: ' + e.message, { nivel: 'aviso' })), 120_000);
+    }
+    if (directoYt && guardados === 'privado') privadoAlTerminar(directoYt.id);
   }
-  if (directoYt && leerConfig().youtube?.directosPrivados !== false) privadoAlTerminar(directoYt.id);
 }
 
 // Bots de otros servicios que escriben en tu chat: el Centro no les contesta ni los cuenta para clips.

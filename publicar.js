@@ -180,21 +180,60 @@ async function reelFacebook({ archivo, texto }) {
   return { id: ini.video_id, url: `https://www.facebook.com/reel/${ini.video_id}` };
 }
 
-async function reelInstagram({ url, texto }) {
-  if (!metaListo() || !meta.igId) throw new Error('Falta tu Instagram profesional vinculado a la Página (http://localhost:3000/meta en la PC)');
-  const t = meta.token;
-  const c = await graph(`/${meta.igId}/media`, { metodo: 'POST', params: { media_type: 'REELS', video_url: url, caption: texto.slice(0, 2200), share_to_feed: 'true' }, token: t });
+// Instagram Reels. Primero por enlace (Meta descarga el video de tu PC por el Funnel); si Meta no puede
+// descargarlo (p. ej. error 2207077), se sube el archivo directo ("resumable upload") sin depender del enlace.
+async function esperarContenedor(id, t) {
   for (let i = 0; i < 20; i++) {
     await esperar(30_000);
-    const s = await graph(`/${c.id}`, { params: { fields: 'status_code,status' }, token: t });
-    if (s.status_code === 'FINISHED') {
-      const p = await graph(`/${meta.igId}/media_publish`, { metodo: 'POST', params: { creation_id: c.id }, token: t });
-      const link = await graph(`/${p.id}`, { params: { fields: 'permalink' }, token: t }).catch(() => ({}));
-      return { id: p.id, url: link.permalink ?? null };
-    }
-    if (['ERROR', 'EXPIRED'].includes(s.status_code)) throw new Error(`Instagram no aceptó el video: ${s.status ?? s.status_code}`);
+    const s = await graph(`/${id}`, { params: { fields: 'status_code,status' }, token: t });
+    if (s.status_code === 'FINISHED') return { ok: true };
+    if (['ERROR', 'EXPIRED'].includes(s.status_code)) return { ok: false, error: s.status ?? s.status_code };
   }
-  throw new Error('Instagram tardó más de 10 min en procesar el video');
+  return { ok: false, error: 'Instagram tardó más de 10 min en procesar el video', tiempo: true };
+}
+
+async function publicarContenedor(id, t) {
+  const p = await graph(`/${meta.igId}/media_publish`, { metodo: 'POST', params: { creation_id: id }, token: t });
+  const link = await graph(`/${p.id}`, { params: { fields: 'permalink' }, token: t }).catch(() => ({}));
+  return { id: p.id, url: link.permalink ?? null };
+}
+
+async function reelInstagramDirecto({ archivo, texto }, t) {
+  const c = await graph(`/${meta.igId}/media`, { metodo: 'POST', params: { media_type: 'REELS', upload_type: 'resumable', caption: texto.slice(0, 2200), share_to_feed: 'true' }, token: t });
+  const datos = readFileSync(archivo);
+  const destino = c.uri || `https://rupload.facebook.com/ig-api-upload/v25.0/${c.id}`;
+  const res = await fetch(destino, {
+    method: 'POST',
+    headers: { Authorization: `OAuth ${t}`, offset: '0', file_size: String(datos.length), 'Content-Type': 'application/octet-stream' },
+    body: datos,
+    signal: AbortSignal.timeout(300_000),
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || d.success === false) throw new Error(`Instagram no recibió el archivo (${res.status}): ${JSON.stringify(d).slice(0, 200)}`);
+  const r = await esperarContenedor(c.id, t);
+  if (!r.ok) throw new Error(`Instagram no aceptó el video (subida directa): ${r.error}`);
+  return publicarContenedor(c.id, t);
+}
+
+async function reelInstagram({ url, texto, archivo }) {
+  if (!metaListo() || !meta.igId) throw new Error('Falta tu Instagram profesional vinculado a la Página (http://localhost:3000/meta en la PC)');
+  const t = meta.token;
+  let error = '';
+  if (url) {
+    try {
+      const c = await graph(`/${meta.igId}/media`, { metodo: 'POST', params: { media_type: 'REELS', video_url: url, caption: texto.slice(0, 2200), share_to_feed: 'true' }, token: t });
+      const r = await esperarContenedor(c.id, t);
+      if (r.ok) return publicarContenedor(c.id, t);
+      if (r.tiempo) throw new Error(r.error);
+      error = r.error;
+    } catch (e) {
+      if (/tardó más de 10 min/.test(e.message)) throw e;
+      error = e.message;
+    }
+    log(`Instagram no pudo bajar el video por el enlace (${String(error).slice(0, 120)}); lo subo directo`, { nivel: 'aviso' });
+  }
+  if (!archivo) throw new Error(`Instagram no aceptó el video: ${error}`);
+  return reelInstagramDirecto({ archivo, texto }, t);
 }
 
 // ---------------- Upload-Post (X) ----------------
@@ -260,7 +299,7 @@ export async function publicarEn(destino, item, { config, carpetaClips }) {
   if (destino === 'tiktok') return { ...(await publicarBuffer('tiktok', { url, texto }, config)), pendiente: true };
   if (destino === 'youtube') return { ...(await publicarBuffer('youtube', { url, texto, titulo: item.tituloShorts ?? item.titulo }, config)), pendiente: true };
   if (destino === 'facebook') return reelFacebook({ archivo, texto });
-  if (destino === 'instagram') return reelInstagram({ url, texto });
+  if (destino === 'instagram') return reelInstagram({ url, texto, archivo });
   if (destino === 'x' && xPorBuffer()) return { ...(await publicarBuffer('twitter', { url, texto: String(item.textoX ?? item.titulo).slice(0, 280) }, config)), pendiente: true };
   if (destino === 'x') return postX({ url, texto: item.textoX ?? item.titulo }, config);
   throw new Error('Destino desconocido: ' + destino);

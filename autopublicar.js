@@ -265,7 +265,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
       let tocado = false;
       for (const [destino, d] of Object.entries(e.destinos)) {
         if (d.recuperado) continue; // se recupera una sola vez (si vuelve a fallar, ya no es por la red)
-        const porRed = RED.test(d.error ?? '') || LIMITE_YT.test(d.error ?? '') || /Sin internet|No pude comprobar en Buffer|Tardó demasiado|Buffer tardó/i.test(d.error ?? '');
+        const porRed = RED.test(d.error ?? '') || LIMITE_YT.test(d.error ?? '') || /Sin internet|No pude comprobar en Buffer|Tardó demasiado|Buffer tardó|Media upload has failed/i.test(d.error ?? '');
         if (d.estado === 'error' && porRed) { Object.assign(d, { estado: 'pendiente', intentos: 0, siguiente: 0 }); d.recuperado = true; tocado = true; }
         // Buffer: si quedó "dudoso" y tiene su número de post, se vuelve a confirmar (no se reenvía).
         else if (d.estado === 'dudoso' && d.info?.id && d.info?.canal) { Object.assign(d, { estado: 'enviado', confirmado: false, hora: Date.now() - 9 * 60_000 }); d.recuperado = true; tocado = true; }

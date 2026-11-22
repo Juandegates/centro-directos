@@ -405,6 +405,81 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     return null;
   }
 
+  // Plan diario: de los videos YA ARMADOS de los directos de ayer, Claude elige los mejores (máximo `cuantos`),
+  // del mejor al peor y con variedad. Devuelve los items en ese orden (puede devolver menos si hay flojos).
+  async function elegirDelDia(items, cuantos = 3) {
+    const porPuntos = [...items].sort((a, b) => (b.puntos ?? 0) - (a.puntos ?? 0));
+    const sinClaude = () => {
+      const salida = [];
+      for (const i of porPuntos) {
+        if (salida.length >= cuantos) break;
+        if (i.resumen && salida.some((x) => x.resumen)) continue; // máximo un resumen
+        salida.push(i);
+      }
+      return salida;
+    };
+    if (items.length <= 1 || !claudeDisponible(leerConfig())) return sinClaude();
+    const carpeta = join(CARPETA_TRABAJO, 'dia-' + nuevoId());
+    mkdirSync(carpeta, { recursive: true });
+    const lineas = [];
+    const conCodigo = [];
+    for (const [n, i] of items.slice(0, 15).entries()) {
+      const vertical = join(CARPETA_CLIPS, i.archivos?.vertical ?? '');
+      if (!existsSync(vertical)) continue;
+      try {
+        const { duracion } = await infoVideo(leerConfig(), vertical);
+        const nombre = `video${String(n + 1).padStart(2, '0')}.jpg`;
+        await hoja(vertical, join(carpeta, nombre), { duracion, columnas: 4, filas: 1, ancho: 240 });
+        const codigo = `V${n + 1}`;
+        conCodigo.push({ codigo, item: i });
+        lineas.push(`${codigo}: imagen ${nombre} (4 cuadros del video vertical terminado, ${Math.round(duracion)} s)${i.resumen ? ' · ES EL RESUMEN de un directo' : ''} · juego: ${i.juego ?? '?'} · ` +
+          `gancho: "${i.gancho ?? ''}" · titulo: "${i.titulo ?? ''}"${i.angulo ? ` · angulo: ${i.angulo}` : ''}${i.porque ? ` · por que se eligio: ${String(i.porque).slice(0, 160)}` : ''}`);
+      } catch { /* sin imagen no se puede comparar */ }
+    }
+    if (conCodigo.length <= 1) return sinClaude();
+    const critico = conCodigo.some((x) => esCritico(x.item.juego, leerConfig()));
+    const prompt =
+      'Eres el editor del canal de un streamer mexicano de PS5. Estos son los videos cortos YA ARMADOS de sus directos de ayer; hoy solo salen los mejores.\n' +
+      `Abre con Read cada imagen y compara:\n${lineas.join('\n')}\n\n` +
+      `Elige como maximo ${cuantos}, ordenados del MEJOR al peor (los 2 primeros salen tambien en YouTube, donde solo caben 2 al dia). ` +
+      'Criterio: que enganchen en el primer segundo a gente que NO conoce el canal, que el texto cuadre con lo que se ve, y VARIEDAD (no dos del mismo tipo de momento ni del mismo angulo). Maximo un resumen. ' +
+      (critico ? 'En los de critica, prefiere los hallazgos mas originales y con mejor fundamento, y descarta los que repiten una critica que ya salio. ' : '') +
+      'Si un video es flojo, mejor no lo elijas (puedes elegir menos).\n' +
+      'Responde SOLO con un JSON: {"elegidos":["V3","V1"],"porque":"una frase"}';
+    try {
+      const r = await preguntarClaude({ prompt, carpeta, config: leerConfig(), minutos: 6 });
+      const orden = (r.elegidos ?? []).map((c) => conCodigo.find((x) => x.codigo === String(c).toUpperCase().trim())?.item).filter(Boolean);
+      const unicos = [...new Set(orden)].slice(0, cuantos);
+      if (unicos.length) { log(`🤖 Claude eligió los videos de hoy: ${unicos.map((i) => i.titulo).join(' · ')}${r.porque ? ` (${String(r.porque).slice(0, 120)})` : ''}`); return unicos; }
+    } catch (e) {
+      log('⚠️ Claude no pudo comparar los videos del día; uso la calificación: ' + e.message, { nivel: 'aviso' });
+    } finally { rmSync(carpeta, { recursive: true, force: true }); }
+    return sinClaude();
+  }
+
+  // Días sin directo ayer: hasta `cuantos` videos del historial (la reserva de momentos guardados), sin rellenar con flojos.
+  async function videosHistorial(cuantos = 3) {
+    const opciones = await opcionesDe(indice.reserva);
+    if (!opciones.length) return [];
+    const top = opciones.sort((a, b) => b.puntos - a.puntos || b.hora - a.hora).slice(0, 10);
+    const d = datos.actual();
+    const contexto = `Ayer NO hubo directo. Estos son momentos guardados de directos anteriores; los videos salen para atraer gente al canal: deben ser llamativos por si solos y su descripcion puede invitar a los directos (${d.horario}). Si alguno es flojo, no lo elijas.`;
+    let elegidos = [];
+    if (claudeDisponible(leerConfig())) {
+      try { elegidos = await elegirConClaude({ opciones: top, cuantos, contexto }); } catch (e) { log('⚠️ Claude no pudo elegir del historial: ' + e.message, { nivel: 'aviso' }); }
+    }
+    if (!elegidos.length) elegidos = (await elegirSinClaude({ opciones: top.filter((o) => o.puntos >= 7), cuantos }));
+    const listos = [];
+    for (const e of elegidos) {
+      if (listos.length >= cuantos) break;
+      const item = await construir(e, { motivo: 'del historial (ayer no hubo directo)', auto: 'gancho' });
+      const c = indice.reserva.find((x) => x.id === e.id);
+      if (c) { rmSync(join(CARPETA_RESERVA, c.archivo), { force: true }); indice.reserva = indice.reserva.filter((x) => x !== c); guardar(); }
+      if (item) listos.push(item);
+    }
+    return listos;
+  }
+
   // Al arrancar: borra restos de trabajos a medias.
   try { for (const f of readdirSync(CARPETA_TRABAJO)) rmSync(join(CARPETA_TRABAJO, f), { recursive: true, force: true }); } catch { /* no existe */ }
   // Candidatos cuyo archivo ya no está (por ejemplo, se borró a mano) se olvidan.
@@ -418,6 +493,8 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     seleccionarDirecto,
     archivarSesion,
     videoGancho,
+    elegirDelDia,
+    videosHistorial,
     ultimaHora: () => Math.max(0, ...indice.items.map((x) => x.hora)),
     sesion: () => indice.sesion,
     cuantos: () => indice.items.length,

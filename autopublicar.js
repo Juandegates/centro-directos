@@ -3,6 +3,9 @@
 // - Luego Claude elige los 3 mejores momentos, se arma el video resumen de 1:30, y se publican espaciados
 //   (el 1º de inmediato y los demás cada 3 horas) en TikTok, YouTube Shorts, Facebook, Instagram y X.
 // - Los días sin directo, a las 6 pm, sale un video "gancho" con lo mejor que quedó guardado.
+// v5.8 — PLAN DIARIO (predeterminado): lo de los directos de HOY se prepara y se guarda; mañana a las 7 am Claude
+//   compara todo lo del día y elige los 3 mejores, que salen a horas fijas (1, 6 y 9 pm). Si ayer no hubo directo,
+//   salen del historial. Máximo 3 al día; en YouTube solo los 2 mejores (su límite).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { lista as bandeja, actualizar, CARPETA_CLIPS } from './bandeja.js';
 import { publicarEn, confirmar, destinosListos, NOMBRES, xPorBuffer, canalesBuffer, bufferConfigurado, esDeBuffer, buscarPostBuffer } from './publicar.js';
@@ -20,8 +23,8 @@ const hoy = () => new Date().toLocaleDateString('en-CA'); // AAAA-MM-DD en tu ho
 const mes = () => hoy().slice(0, 7);
 
 function leer() {
-  try { return { pendiente: null, cola: [], ultimoGancho: null, ultimoDirecto: null, xMes: { mes: mes(), usados: 0 }, ...JSON.parse(readFileSync(ARCHIVO, 'utf8')) }; } catch {
-    return { pendiente: null, cola: [], ultimoGancho: null, ultimoDirecto: null, xMes: { mes: mes(), usados: 0 } };
+  try { return { pendiente: null, cola: [], pool: [], ultimoPlan: null, ultimoGancho: null, ultimoDirecto: null, xMes: { mes: mes(), usados: 0 }, ...JSON.parse(readFileSync(ARCHIVO, 'utf8')) }; } catch {
+    return { pendiente: null, cola: [], pool: [], ultimoPlan: null, ultimoGancho: null, ultimoDirecto: null, xMes: { mes: mes(), usados: 0 } };
   }
 }
 
@@ -29,7 +32,12 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
   let s = leer();
   const guardar = () => writeFileSync(ARCHIVO, JSON.stringify(s, null, 2));
   const cfg = () => ({ activo: true, minutosDespues: 60, horasEntre: 3, clipsPorDirecto: 3, resumen: true, horaGancho: '18:00', maxXMes: 10, minimoMinutos: 10,
-    silencio: { desde: 0, hasta: 9 }, ...(leerConfig().autoPublicar ?? {}) });
+    silencio: { desde: 0, hasta: 9 }, planDiario: true, horaPlan: '07:00', horarios: ['13:00', '18:00', '21:00'], videosPorDia: 3, youtubePorDia: 2,
+    ...(leerConfig().autoPublicar ?? {}) });
+  const diaDe = (ms) => new Date(ms).toLocaleDateString('en-CA');
+  const ayer = () => diaDe(Date.now() - 24 * HORA);
+  const aHoraDeHoy = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); const f = new Date(); f.setHours(h, m || 0, 0, 0); return f.getTime(); };
+  const horaCorta = (ms) => new Date(ms).toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' });
   // Horario de silencio (de 12 am a 9 am): un video que caiga ahí se recorre a las 9 am (casi nadie ve de madrugada).
   function fueraDeSilencio(cuando) {
     const { desde = 0, hasta = 9 } = cfg().silencio ?? {};
@@ -118,6 +126,7 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
   async function procesarDirecto() {
     const c = cfg();
     const { minutos } = s.pendiente;
+    const diaDirecto = diaDe(s.pendiente.termino ?? Date.now());
     // Se marca "procesando" (no se borra): si la PC se reinicia a la mitad, se retoma al volver.
     s.pendiente.procesando = true;
     guardar();
@@ -147,6 +156,15 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
       avisar('🎬 Sin videos de este directo', 'No hubo momentos suficientes para armar videos. Se guardó lo que hubo para los días sin directo.', { clave: 'sin-videos-' + Date.now() });
       return;
     }
+    if (c.planDiario) {
+      // Plan diario: se guardan para mañana; a las 7 am Claude elige los mejores de todo el día.
+      s.pool = [...(s.pool ?? []), ...videos.map((v) => ({ itemId: v.id, dia: diaDirecto, puntos: v.puntos ?? 8, resumen: Boolean(v.resumen) }))];
+      guardar();
+      const lista = videos.map((v, i) => `${i + 1}. ${v.titulo}`).join('\n');
+      avisar('🎬 Videos del directo preparados', `${lista}\nMañana Claude elige los ${c.videosPorDia} mejores del día y salen a las ${c.horarios.join(', ')}.`, { abrir: `${urlApp()}#publicar`, etiquetas: ['clapper'], clave: 'preparados-' + Date.now() });
+      log(`🗂️ ${videos.length} video(s) del directo preparados para el plan de mañana`);
+      return;
+    }
     let t = Date.now();
     let programados = 0;
     videos.forEach((v, i) => {
@@ -160,6 +178,45 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     } else {
       avisar('🎬 Videos del directo listos', `${horas}\nTodavía no hay redes conectadas para publicarlos solo: ábrelos en Publicar.`, { abrir: `${urlApp()}#publicar`, clave: 'listos-' + Date.now() });
     }
+  }
+
+  // ---------- Plan diario (7 am): los 3 mejores del día anterior, a horas fijas ----------
+  async function planDelDia() {
+    const c = cfg();
+    s.ultimoPlan = hoy();
+    guardar();
+    if (!destinosListos(leerConfig()).length) return;
+    const limite3 = diaDe(Date.now() - 3 * 24 * HORA);
+    s.pool = (s.pool ?? []).filter((p) => p.dia >= limite3);
+    const delPool = s.pool.filter((p) => p.dia < hoy());
+    const items = delPool.map((p) => ({ ...bandeja().find((x) => x.id === p.itemId), puntos: p.puntos })).filter((i) => i.id && !Object.values(i.publicado ?? {}).some(Boolean));
+    // ¿Cuántos caben hoy? (por si ya hay algo programado para hoy, por ejemplo de antes de este cambio)
+    const finHoy = aHoraDeHoy('23:59');
+    const yaHoy = s.cola.filter((e) => !e.manual && e.cuando >= aHoraDeHoy('00:00') && e.cuando <= finHoy).length;
+    const caben = Math.max(0, c.videosPorDia - yaHoy);
+    if (!caben) { log('📅 Hoy ya hay videos programados; el plan del día no agrega más'); s.pool = s.pool.filter((p) => p.dia >= hoy()); guardar(); return; }
+    let elegidos = [];
+    let origen = 'de los directos de ayer';
+    if (items.length) {
+      log(`📅 Plan del día: Claude compara ${items.length} video(s) de los directos de ayer`);
+      elegidos = await candidatos.elegirDelDia(items, caben);
+    } else if (s.ultimoDirecto !== ayer()) {
+      origen = 'del historial (ayer no hubo directo)';
+      log('📅 Plan del día: ayer no hubo directo; busco en el historial');
+      elegidos = await candidatos.videosHistorial(caben);
+    }
+    s.pool = s.pool.filter((p) => p.dia >= hoy()); // lo de días anteriores ya se consideró
+    guardar();
+    if (!elegidos.length) { log('📅 Plan del día: no hay videos buenos para hoy'); return; }
+    // Horarios: los fijos que todavía no pasan (si el plan corre tarde, salen menos ese día; si ya pasaron todos, uno en 5 min).
+    let horas = c.horarios.map(aHoraDeHoy).filter((t) => t > Date.now() + 5 * 60_000);
+    if (!horas.length && Date.now() < aHoraDeHoy('22:00')) horas = [Date.now() + 5 * 60_000];
+    const programados = [];
+    elegidos.slice(0, horas.length).forEach((v, i) => {
+      const saltar = i >= c.youtubePorDia ? ['youtube'] : []; // YouTube: solo los mejores (su límite diario)
+      if (encolar({ ...v, plan: true }, horas[i], { conX: xPorBuffer() || (i === 0 && usarX()), saltar })) programados.push(`${horaCorta(horas[i])} · ${v.titulo}${saltar.length ? ' (sin YouTube)' : ''}`);
+    });
+    if (programados.length) avisar('📅 Videos de hoy', `${programados.join('\n')}\nSon los mejores ${origen}.`, { abrir: `${urlApp()}#publicar`, etiquetas: ['calendar'], clave: 'plan-' + hoy() });
   }
 
   async function ganchoDelDia() {
@@ -356,7 +413,10 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
       const [h, m] = String(c.horaGancho).split(':').map(Number);
       const ahora = new Date();
       const yaEsHora = ahora.getHours() * 60 + ahora.getMinutes() >= h * 60 + (m || 0);
-      if (yaEsHora && !enVivo() && !s.pendiente && s.ultimoDirecto !== hoy() && s.ultimoGancho !== hoy()) await ganchoDelDia();
+      if (c.planDiario) {
+        const [ph, pm] = String(c.horaPlan).split(':').map(Number);
+        if (ahora.getHours() * 60 + ahora.getMinutes() >= ph * 60 + (pm || 0) && s.ultimoPlan !== hoy() && !s.pendiente?.procesando) await planDelDia();
+      } else if (yaEsHora && !enVivo() && !s.pendiente && s.ultimoDirecto !== hoy() && s.ultimoGancho !== hoy()) await ganchoDelDia();
       reacomodarSilencio();
       await publicarPendientes();
     } catch (e) {
@@ -389,6 +449,6 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
     // Lo que viene y lo que ya salió (para la app).
     cola: () => s.cola.map((e) => ({ id: e.itemId, titulo: e.titulo, cuando: new Date(e.cuando).toISOString(), destinos: Object.fromEntries(Object.entries(e.destinos).map(([k, d]) => [k, { estado: d.estado, url: d.url ?? null, error: d.error ?? null }])) })),
     pendiente: () => (s.pendiente ? { publicaA: new Date(s.pendiente.termino + cfg().minutosDespues * 60_000).toISOString() } : null),
-    _tick: tick, _estado: () => s,
+    _tick: tick, _estado: () => s, _plan: planDelDia,
   };
 }

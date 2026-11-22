@@ -7,9 +7,9 @@ import { correrFfmpeg, letraParaTextos } from './herramientas.js';
 import { preguntarIA } from './ia.js';
 import { recortar } from './promos.js';
 import { lineaCuentas, lineasCuentas, filtroVertical, partirGancho, instruccionNoRepetir } from './clips.js';
-import { agregar, nuevoId, CARPETA_CLIPS } from './bandeja.js';
+import { agregar, nuevoId, CARPETA_CLIPS, lista as bandeja } from './bandeja.js';
 import { log } from './estado.js';
-import { esCritico, RESUMEN_CRITICO } from './tono.js';
+import { esCritico, RESUMEN_CRITICO, frasesGastadas } from './tono.js';
 
 // Cuántos momentos y cuánto de cada uno para llegar a la duración pedida.
 export function planResumen(piezas, { segundos = 90, maximo = 6, minimoPorMomento = 10, maximoPorMomento = 30 } = {}) {
@@ -67,7 +67,7 @@ export function crearResumen({ leerConfig, datos, avisar, urlApp, canalLogin, mo
         sistema: `Eres el community manager de ${d.nombre}, streamer mexicano de PS5. Escribes en espanol mexicano, con gancho, sin mentir.`,
         texto: `Directo de ${minutos} min jugando ${d.juego}. Momentos del video resumen, en orden: ${lista || '(sin descripcion)'}.\n` +
           (fuerte.length ? `LO MAS FUERTE DEL DIRECTO (usalo como gancho principal): ${fuerte.join('; ')}.\n` : '') +
-          (esCritico(d.juego, leerConfig()) ? RESUMEN_CRITICO
+          (esCritico(d.juego, leerConfig()) ? RESUMEN_CRITICO + (() => { const g = frasesGastadas(bandeja().filter((i) => i.juego === d.juego).slice(0, 25).flatMap((i) => [i.gancho, i.titulo]), { juego: d.juego }); return g.length ? `FRASES GASTADAS (PROHIBIDO usarlas): ${g.map((f) => `"${f}"`).join(', ')}. ` : ''; })()
             : 'Los titulos deben decir lo concreto y mas llamativo que paso (un jefe vencido, una pelea larga, una muerte epica), no frases genericas como "lo mejor del directo". ') +
           instruccionNoRepetir() +
           'No inventes nada que no este en esos datos. Devuelve SOLO un JSON: {"gancho": "frase para escribir encima del video, max 32 caracteres, sin hashtags ni emojis", ' +

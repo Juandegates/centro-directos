@@ -12,7 +12,7 @@ import { recortar } from './promos.js';
 import { agregar, nuevoId, lista as bandeja, CARPETA_CLIPS } from './bandeja.js';
 import { preguntarClaude, claudeDisponible } from './claude.js';
 import { preguntarIA } from './ia.js';
-import { esCritico, CRITERIO_CRITICO, REGLAS_TEXTO_CRITICO, REVISION_CRITICA } from './tono.js';
+import { esCritico, CRITERIO_CRITICO, REGLAS_TEXTO_CRITICO, REVISION_CRITICA, frasesGastadas } from './tono.js';
 import { infoVideo } from './editor.js';
 import { log, marcar } from './estado.js';
 
@@ -119,8 +119,17 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     return Array.from({ length: n }, (_, i) => Math.round((i * duracion) / n));
   }
 
-  const publicadosRecientes = () => bandeja().filter((i) => i.tipo === 'clip' && (i.auto || Object.values(i.publicado ?? {}).some(Boolean)))
-    .slice(0, 25).map((i) => `- "${i.gancho ?? ''}" / ${i.titulo ?? ''}`).join('\n') || '(ninguno todavía)';
+  const recientes = () => bandeja().filter((i) => i.tipo === 'clip' && (i.auto || Object.values(i.publicado ?? {}).some(Boolean))).slice(0, 25);
+  const publicadosRecientes = () => recientes()
+    .map((i) => `- "${i.gancho ?? ''}" / ${i.titulo ?? ''}${i.angulo ? ` [angulo: ${i.angulo}]` : ''}`).join('\n') || '(ninguno todavía)';
+  // Modo crítico: frases que ya se gastaron y ángulos usados en los últimos videos del mismo juego (para no repetir).
+  function antiRepeticion(juego) {
+    const mismos = recientes().filter((i) => !juego || i.juego === juego);
+    const gastadas = frasesGastadas(mismos.flatMap((i) => [i.gancho, i.titulo]), { juego });
+    const angulos = [...new Set(mismos.slice(0, 8).map((i) => i.angulo).filter(Boolean))];
+    return (gastadas.length ? `FRASES GASTADAS (PROHIBIDO usarlas, ni parecidas): ${gastadas.map((f) => `"${f}"`).join(', ')}.\n` : '') +
+      (angulos.length ? `ANGULOS YA USADOS en los ultimos videos (evitalos si hay otro hallazgo valido): ${angulos.join('; ')}.\n` : '');
+  }
 
   // Arma el clip final (horizontal + vertical con el gancho y tus cuentas).
   async function armarClip({ entrada, inicio, fin, textos, carpeta, yaVertical = false }) {
@@ -172,7 +181,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     `Escribes en espanol mexicano natural, en primera persona como el streamer (Juan, canal ${canalLogin || 'juangates'}). Juego: ${juego}.\n` +
     'Para cada video escribe: "gancho" (frase escrita ENCIMA del video en los primeros segundos, max 32 caracteres, sin hashtags ni emojis, pregunta o reaccion), ' +
     '"titulo" (max 60), "tituloShorts" (max 85, con el nombre del juego, sin hashtags), "tiktok" (descripcion con 4 a 6 hashtags, max 180), "x" (texto para X, max 200, sin links).\n' +
-    (critico(juego) ? REGLAS_TEXTO_CRITICO : '') +
+    (critico(juego) ? REGLAS_TEXTO_CRITICO + antiRepeticion(juego) : '') +
     `VIDEOS QUE YA PUBLICASTE (no repitas sus frases ni su estructura; varia el estilo):\n${publicadosRecientes()}\n`;
 
   // ---------- Selección: Claude elige los mejores ----------
@@ -209,7 +218,8 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
         let fin = Math.min(o.duracion, Number(e.fin) || o.duracion);
         if (fin - inicio < 12) { inicio = Math.max(0, o.duracion - 45); fin = o.duracion; }
         if (fin - inicio > 58) inicio = fin - 58;
-        return { id: o.id, opcion: o, inicio, fin, porque: e.porque ?? '', textos: e };
+        const analisis = [e.observacion, e.fundamento].filter(Boolean).join(' · ');
+        return { id: o.id, opcion: o, inicio, fin, porque: e.porque || analisis, angulo: e.angulo ?? null, fundamento: e.fundamento ?? null, textos: e };
       }).filter(Boolean);
       log(`🤖 Claude eligió: ${elegidos.map((e) => `${e.opcion.codigo} (${e.porque.slice(0, 60)})`).join(' · ')}`);
       return elegidos;
@@ -250,7 +260,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
         'Eres el revisor final antes de publicar un video corto en TikTok y YouTube Shorts del canal de un streamer mexicano de PS5.\n' +
         'Abre con Read la imagen video.jpg (4 cuadros del video vertical ya terminado, con su texto encima) y revisa:\n' +
         '1) que el texto escrito encima y el titulo tengan logica con lo que se ve; 2) que no se repita con videos anteriores; 3) que el video no sea puro menu, mapa, carga o pantalla negra; 4) que el texto se lea bien.\n' +
-        (critico(juegoRevision) ? REVISION_CRITICA + REGLAS_TEXTO_CRITICO : '') +
+        (critico(juegoRevision) ? REVISION_CRITICA + REGLAS_TEXTO_CRITICO + antiRepeticion(juegoRevision) : '') +
         `Lo que se cree que pasa: ${que || '(sin dato)'}\nTextos: ${JSON.stringify({ gancho: textos.gancho, titulo: textos.titulo, tituloShorts: textos.tituloShorts, tiktok: textos.tiktok, x: textos.x })}\n` +
         `Videos ya publicados:\n${publicadosRecientes()}\n\n` +
         'Responde SOLO con un JSON: {"publicar": true} si esta bien; {"publicar": true, "corregir": {"gancho":"...","titulo":"...","tituloShorts":"...","tiktok":"...","x":"..."}} si solo hay que mejorar textos (pon solo los que cambian); o {"publicar": false, "motivo": "..."} si el video no sirve.';
@@ -289,6 +299,7 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
       return agregar({
         id, tipo: 'clip', auto, motivo, puntos: e.opcion.puntos ?? 8, gancho: textos.gancho, juego: e.opcion.juego,
         titulo: textos.titulo, textoTikTok: textos.tiktok, tituloShorts: textos.tituloShorts, textoX: textos.x, porque: e.porque,
+        ...(e.angulo ? { angulo: String(e.angulo).slice(0, 80) } : {}),
         archivos: { horizontal: `${id}/horizontal.mp4`, vertical: `${id}/vertical.mp4`, portada: `${id}/portada.jpg` },
       });
     } catch (err) {

@@ -160,7 +160,8 @@ export function crearCandidatos({ captura, leerConfig, datos, canalLogin = '', m
     const juego = t.juego || d.juego || '';
     const base = recortar(String(t.tituloShorts || t.titulo || `Momento en ${juego}`).replace(/#\S+/g, '').replace(/\s+/g, ' ').trim(), 100 - ' #Shorts'.length);
     const cuentas = lineaCuentas(config, canalLogin);
-    const tiktok = String(t.tiktok || `${t.titulo || base} 🎮 #${juego.replace(/[^a-z0-9]/gi, '')} #PS5 #gaming`).slice(0, 1800);
+    // Si la descripción ya trae la línea de cuentas (p. ej. Claude la copió al corregir), se quita para no repetirla.
+    const tiktok = String(t.tiktok || `${t.titulo || base} 🎮 #${juego.replace(/[^a-z0-9]/gi, '')} #PS5 #gaming`).split('\n').filter((l) => !/^\s*🎮\s*En vivo en /.test(l)).join('\n').trim().slice(0, 1800);
     return {
       gancho: limpiarGancho(t.gancho) || 'Mira esto',
       titulo: recortar(String(t.titulo || base), 70),

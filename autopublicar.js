@@ -312,6 +312,8 @@ export function crearAutopublicar({ leerConfig, candidatos, resumen, avisar, url
           // Buffer: ¿ya salió de verdad?
           const r = await confirmar(destino, d.info).catch(() => ({ estado: 'desconocido' }));
           if (r.estado === 'sent') { d.estado = 'ok'; d.url = r.url ?? d.url; d.confirmado = true; actualizar(item.id, { publicado: { [destino]: d.url || true } }); }
+          // Buffer avisa que la subida "tardó" y que quizá sí salió: no se reenvía (para no duplicarlo).
+          else if (r.estado === 'error' && /timed out|may have published|tardó/i.test(r.error ?? '')) { d.estado = 'dudoso'; d.confirmado = true; d.error = 'YouTube tardó en confirmar; puede que sí haya salido (no lo reenvío para no duplicarlo)'; log(`❔ ${NOMBRES[destino]}: "${item.titulo}" quizá sí salió (Buffer no recibió confirmación); no lo reenvío`, { nivel: 'aviso' }); }
           else if (r.estado === 'error' && LIMITE_YT.test(r.error ?? '')) { d.estado = 'pendiente'; d.info = null; esperarTurnoYoutube(e, d, item); }
           else if (r.estado === 'error') { d.estado = 'pendiente'; d.intentos++; d.error = r.error; d.siguiente = Date.now() + 20 * 60_000; log(`⚠️ ${NOMBRES[destino]} rechazó "${item.titulo}": ${r.error}`, { nivel: 'aviso' }); }
           else if (Date.now() - d.hora > 2 * HORA && !sinInternet()) { d.confirmado = true; d.estado = 'dudoso'; log(`❔ No pude confirmar si "${item.titulo}" salió en ${NOMBRES[destino]}; revísalo en la app de ${NOMBRES[destino]}`, { nivel: 'aviso' }); }

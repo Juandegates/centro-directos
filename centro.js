@@ -33,7 +33,7 @@ import * as kick from './kick.js';
 import { crearCandidatos } from './candidatos.js';
 import { crearAutopublicar } from './autopublicar.js';
 import { iniciarPublico, configurarBase, urlBase } from './publico.js';
-import { metaConfigurado, metaPaginas, metaGuardar, metaInfo, destinosListos, xPorBuffer, postTextoX, canalesBuffer, bufferConfigurado } from './publicar.js';
+import { metaConfigurado, metaPaginas, metaGuardar, metaInfo, metaListo, destinosListos, xPorBuffer, postTextoX, postTextoFacebook, canalesBuffer, bufferConfigurado } from './publicar.js';
 import { writeFileSync as escribirArchivo } from 'node:fs';
 
 console.log(`\n=== Centro de Directos · v${VERSION} ===\n`);
@@ -640,6 +640,12 @@ async function iniciar() {
       log('📣 Publicado en X: ' + texto.slice(0, 60));
       return true;
     },
+    publicarFacebook: async (texto, link) => {
+      if (leerConfig().autoPublicar?.activo === false || leerConfig().autoPublicar?.destinos?.facebook === false || !metaListo()) return false;
+      await postTextoFacebook(texto, link);
+      return true;
+    },
+    leerConfig,
   });
   ctx.auto = crearAutopublicar({ leerConfig, candidatos: ctx.candidatos, resumen: ctx.resumen, avisar, urlApp, enVivo: () => ctx.datos.actual().enVivo });
   // Si el Centro se reinició mientras esperaba para publicar, recupera los pedacitos del resumen.

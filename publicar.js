@@ -10,6 +10,7 @@ import { publicar as enlacePublico } from './publico.js';
 import { correrFfmpeg } from './herramientas.js';
 import { infoVideo } from './editor.js';
 import { log } from './estado.js';
+import { conHorario } from './horario.js';
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const valor = (k) => {
@@ -85,12 +86,14 @@ export async function buscarPostBuffer(destino, item, config) {
   await canalesBuffer();
   const canal = canalDe(SERVICIO_DE[destino], config);
   if (!canal) return null;
-  const texto = (destino === 'x' ? String(item.textoX ?? item.titulo).slice(0, 280) : item.textoTikTok ?? item.titulo ?? '').trim();
+  // Mismo texto que se manda (con la línea del horario al final), y se acepta también sin ella (posts de antes).
+  const sinLinea = String(item.textoTikTok ?? item.titulo ?? '').trim();
+  const textos = destino === 'x' ? [String(item.textoX ?? item.titulo).slice(0, 280).trim()] : [conHorario(sinLinea, config), sinLinea];
   const d = await gql('query B($input: PostsInput!) { posts(first: 25, input: $input) { edges { node { id text status createdAt } } } }',
     { input: { organizationId: bufferCache.org, filter: { channelIds: [canal.id] } } });
   const nodos = d.posts?.edges?.map((e) => e.node).filter(Boolean) ?? [];
   const limite = Date.now() - 12 * 3600_000;
-  const igual = nodos.find((n) => String(n.text ?? '').trim() === texto && n.status !== 'error'
+  const igual = nodos.find((n) => textos.includes(String(n.text ?? '').trim()) && n.status !== 'error'
     && (!n.createdAt || new Date(n.createdAt).getTime() >= limite));
   return igual ? { id: igual.id, canal: canal.id, estado: igual.status, url: null } : null;
 }
@@ -178,6 +181,13 @@ async function reelFacebook({ archivo, texto }) {
   if (!sub.ok || s.success === false || s.error) throw new Error(`Facebook no aceptó el video: ${s.error?.message ?? s.debug_info?.message ?? sub.status}`);
   await graph(`/${meta.paginaId}/video_reels`, { metodo: 'POST', params: { upload_phase: 'finish', video_id: ini.video_id, video_state: 'PUBLISHED', description: texto.slice(0, 2000) }, token: t });
   return { id: ini.video_id, url: `https://www.facebook.com/reel/${ini.video_id}` };
+}
+
+// Post de texto con enlace en tu Página (por ejemplo, "entro en vivo en 15 min").
+export async function postTextoFacebook(texto, link) {
+  if (!metaListo()) throw new Error('Falta conectar tu Página de Facebook');
+  const r = await graph(`/${meta.paginaId}/feed`, { metodo: 'POST', params: { message: String(texto).slice(0, 2000), ...(link ? { link } : {}) }, token: meta.token });
+  return { id: r.id, url: r.id ? `https://www.facebook.com/${r.id}` : null };
 }
 
 // Instagram Reels. Primero por enlace (Meta descarga el video de tu PC por el Funnel); si Meta no puede
@@ -295,7 +305,8 @@ export async function publicarEn(destino, item, { config, carpetaClips }) {
   if (!existsSync(vertical)) throw new Error('El video ya no existe en la PC');
   const archivo = destino === 'facebook' ? await versionFacebook(config, vertical) : vertical;
   const url = destino === 'facebook' ? null : enlacePublico(archivo, 72);
-  const texto = item.textoTikTok ?? item.titulo ?? '';
+  // Al final de la descripción: tu horario de directos, para que quien vea el video sepa cuándo encontrarte en vivo.
+  const texto = conHorario(item.textoTikTok ?? item.titulo ?? '', config);
   if (destino === 'tiktok') return { ...(await publicarBuffer('tiktok', { url, texto }, config)), pendiente: true };
   if (destino === 'youtube') return { ...(await publicarBuffer('youtube', { url, texto, titulo: item.tituloShorts ?? item.titulo }, config)), pendiente: true };
   if (destino === 'facebook') return reelFacebook({ archivo, texto });

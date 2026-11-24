@@ -5,6 +5,7 @@ import { preguntarIA } from './ia.js';
 import { marcar, log, verPartes } from './estado.js';
 import * as twitch from './twitch.js';
 import { golpe } from './red.js';
+import { horarioFijo, describirFijo } from './horario.js';
 
 const ARCHIVO = new URL('./memoria.json', import.meta.url);
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -109,7 +110,11 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
     fuentesHorario = publicado.length ? publicado : pasados.map((v) => v.fecha);
     actualizarHorario();
   }
-  const actualizarHorario = () => { estado.horario = describirHorario([...fuentesHorario, ...memoria.inicios]); };
+  // Si tienes horario fijo (config.json → horarioDirectos), manda ese; si no, el que se aprende de tus directos.
+  const actualizarHorario = () => {
+    const fijo = horarioFijo(leerConfig());
+    estado.horario = fijo ? describirFijo(fijo) : describirHorario([...fuentesHorario, ...memoria.inicios]);
+  };
 
   // Cada 20 min en vivo (config: pantalla.notasCadaMinutos): mira la pantalla y actualiza las notas de tu partida.
   async function aprenderDelJuego() {
@@ -188,12 +193,14 @@ export function crearDatos({ canal, verPantalla, leerConfig, alCambioVivo, alCam
     descartarSugerencia: () => { estado.sugerencia = null; sospechas = 0; },
     // "No, es correcto": no volver a preguntar por esta categoría mientras el Centro esté prendido.
     confirmarCategoria: () => { confirmados.add(normal(estado.juego)); estado.sugerencia = null; sospechas = 0; log(`✅ Categoría confirmada: ${estado.juego}`); },
+    // Cuándo empezó tu último directo (para no avisar "entro en 15 min" si llevas días sin transmitir).
+    ultimoInicio: () => memoria.directos.at(-1)?.inicio ?? memoria.inicios.at(-1) ?? null,
     actual: () => ({
       nombre: canal.display_name,
       juego: estado.juego || 'sin juego definido',
       juegoId: estado.juegoId,
       titulo: estado.titulo,
-      horario: estado.horario,
+      horario: describirFijo(horarioFijo(leerConfig())) || estado.horario,
       enVivo: estado.enVivo,
       inicio: estado.inicio,
       espectadores: estado.espectadores,

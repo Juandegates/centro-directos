@@ -1,6 +1,9 @@
-// Posts de promoción: "ya estoy en vivo" al empezar y un resumen al terminar.
+// Posts de promoción: "entro en vivo en 15 min" (según tu horario), "ya estoy en vivo" al empezar y un resumen al terminar.
 import { preguntarIA } from './ia.js';
 import { agregar, nuevoId, lista, actualizar } from './bandeja.js';
+import { horarioFijo, textoHoras, tocaAviso } from './horario.js';
+import { ajustes, guardarAjustes } from './ajustes.js';
+import { log } from './estado.js';
 
 // Recorta un texto sin dejar palabras a medias: en la última frase completa, o si no en la última palabra.
 export function recortar(texto, max) {
@@ -14,7 +17,7 @@ export function recortar(texto, max) {
 
 export const urlX = (texto) => `https://x.com/intent/post?text=${encodeURIComponent(texto)}`;
 
-export function crearPromos({ datos, avisar, urlApp, urlTwitch, publicarX = async () => false }) {
+export function crearPromos({ datos, avisar, urlApp, urlTwitch, publicarX = async () => false, publicarFacebook = async () => false, leerConfig = () => ({}) }) {
   async function escribir(instruccion, respaldo) {
     const d = datos.actual();
     try {
@@ -28,7 +31,48 @@ export function crearPromos({ datos, avisar, urlApp, urlTwitch, publicarX = asyn
     }
   }
 
+  // ---------- aviso antes del directo ----------
+  // Los días de tu horario, 15 min antes de la hora: post en X y en tu Página de Facebook con el juego y la hora.
+  // No avisa si ya estás en vivo, si ya se avisó hoy (aunque el Centro se reinicie) o si llevas más de 7 días sin
+  // transmitir (vacaciones: que no se anuncie un directo que no va a haber). TikTok y la comunidad de YouTube
+  // no permiten publicar texto desde programas, por eso el aviso va solo a X y Facebook.
+  let avisando = false;
+  async function avisoPrevio(ahora = new Date()) {
+    const config = leerConfig();
+    const hoy = tocaAviso(config, ahora);
+    if (!hoy || avisando || ajustes().avisoPrevio === hoy || datos.actual().enVivo) return false;
+    const ultimo = datos.ultimoInicio?.();
+    if (!ultimo || ahora.getTime() - new Date(ultimo).getTime() > 7 * 24 * 3600_000) return false;
+    avisando = true;
+    try {
+      guardarAjustes({ avisoPrevio: hoy }); // primero se marca: nunca sale dos veces
+      const h = horarioFijo(config);
+      const d = datos.actual();
+      const cuando = textoHoras(h);
+      const texto = await escribir(
+        `Escribe un post avisando que HOY entras en vivo ${cuando} (falta poco) jugando ${d.juego}, en Twitch, YouTube y Kick. Invita a llegar desde el inicio con una razon concreta del juego. No incluyas links (se agregan solos).`,
+        `Hoy en vivo ${cuando} con ${d.juego} 🎮 ¡Caile desde el inicio!`,
+      );
+      const link = urlTwitch();
+      const donde = [];
+      if (await publicarX(`${texto}\n${link}`).catch((e) => { log('Aviso previo en X: ' + e.message, { nivel: 'aviso' }); return false; })) donde.push('X');
+      if (await publicarFacebook(texto, link).catch((e) => { log('Aviso previo en Facebook: ' + e.message, { nivel: 'aviso' }); return false; })) donde.push('Facebook');
+      agregar({ id: nuevoId(), tipo: 'post', titulo: 'Aviso: hoy entro en vivo', textoX: `${texto}\n${link}`, ...(donde.includes('X') ? { publicado: { x: true } } : {}) });
+      if (donde.length) {
+        log(`📣 Avisé en ${donde.join(' y ')} que hoy entras ${cuando}`);
+        avisar(`📣 Avisé en ${donde.join(' y ')} que hoy entras ${cuando}`, texto, { etiquetas: ['loudspeaker'], clave: 'aviso-previo-' + hoy });
+      } else {
+        avisar('📣 Aviso de hoy listo para X', `${texto}\n${link}`, {
+          etiquetas: ['loudspeaker'], acciones: [{ texto: 'Publicar en X', url: urlX(`${texto}\n${link}`) }], clave: 'aviso-previo-' + hoy,
+        });
+      }
+      return true;
+    } finally { avisando = false; }
+  }
+  setInterval(() => { avisoPrevio().catch((e) => log('Aviso previo: ' + e.message, { nivel: 'aviso' })); }, 60_000);
+
   return {
+    avisoPrevio,
     async alEmpezar() {
       const d = datos.actual();
       const texto = await escribir('Escribe un post anunciando que estas EN VIVO ahora mismo. No incluyas links (se agregan solos).', `¡Ya estoy en vivo jugando ${d.juego}! Caile 🎮`);

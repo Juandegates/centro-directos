@@ -302,7 +302,7 @@ export function crearBot({ plataforma, enviar, verPantalla = () => [], datos, an
       if (saludadosHoy.has(id)) {
         marca = ' [YA LO SALUDASTE: contesta directo, sin saludo]';
       } else if (config.saludarNuevos !== false && !conocidos.has(id)) {
-        marca = ' [SALUDALO: es su PRIMERA VEZ en el canal, dale la bienvenida]';
+        marca = ' [SALUDALO: es su PRIMERA VEZ en el canal: dale la bienvenida por su nombre, agradecele que llego y hazle UNA pregunta corta y facil sobre el juego o lo que esta pasando ahorita, para que se quede platicando]';
         conocidos.add(id); guardarConocidos();
       } else {
         marca = ' [SALUDALO: ya es conocido, saludalo como a alguien que regresa]';
